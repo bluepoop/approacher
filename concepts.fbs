@@ -1,0 +1,12 @@
+// ObjectBox FlatBuffers 模式文件 - 概念相似度分析器
+// 定义 Concept 数据结构，用于存储概念库数据
+
+table Concept {
+    id: ulong;                      // 概念唯一标识符
+    feature_keys: [string];         // 特征键名数组 ["name", "color", "position"]
+    feature_values: [string];       // 特征值数组 ["apple", "red", "home"]
+
+    // feature_keys[i] 与 feature_values[i] 对应同一个特征
+    // 例如: keys=["name","color"], values=["apple","red"]
+    //      表示 [name:apple, color:red]
+}

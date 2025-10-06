@@ -168,12 +168,115 @@ sample2.confidence = 0.8;  // 80%确信
 重合分析 → analyzeOverlap() → 相似度计算
 ```
 
+## 已实现函数详解
+
+### 1. matchConceptExact 函数
+
+**功能**: 计算输入特征列表与单个概念的精确匹配结果
+
+```cpp
+MatchResult ConceptDatabase::matchConceptExact(
+    const vector<Feature>& input_features,
+    const unique_ptr<Concept>& concept
+);
+```
+
+**参数**:
+- `input_features`: 用户输入的特征列表
+- `concept`: 要匹配的概念对象
+
+**返回值**: `MatchResult` - 包含概念ID、匹配数量、匹配索引
+
+**匹配逻辑**:
+- **模糊匹配**（key为空）: 在概念的所有feature_values中查找相同值
+- **精确匹配**（key不为空）: 查找key和value都相同的特征对
+
+**示例**:
+```cpp
+// 输入: ["red", "name:apple"]
+// 概念1: [name:apple, color:red, position:home]
+// 结果: MatchResult{concept_id=1, match_count=2, matched_indices=[0,1]}
+//       - "red" 匹配 color:red (输入索引0)
+//       - "name:apple" 匹配 name:apple (输入索引1)
+```
+
+### 2. findMatchingConcepts 函数
+
+**功能**: 根据特征列表查找数据库中所有匹配的概念
+
+```cpp
+vector<MatchResult> ConceptDatabase::findMatchingConcepts(
+    const vector<Feature>& input_features
+);
+```
+
+**参数**:
+- `input_features`: 用户输入的特征列表
+
+**返回值**: `vector<MatchResult>` - 所有匹配结果的列表（只包含match_count > 0的结果）
+
+**工作流程**:
+1. 获取数据库中所有概念
+2. 对每个概念调用 `matchConceptExact`
+3. 过滤掉无匹配的结果
+4. 返回有效匹配列表
+
+**示例**:
+```cpp
+// 输入: ["red", "name:apple"]
+// 返回:
+// [
+//   MatchResult{concept_id=1, match_count=2, matched_indices=[0,1]},
+//   MatchResult{concept_id=2, match_count=2, matched_indices=[0,1]},
+//   MatchResult{concept_id=3, match_count=1, matched_indices=[1]},
+//   MatchResult{concept_id=4, match_count=1, matched_indices=[0]}
+// ]
+```
+
+### 3. parseFeatureList 函数
+
+**功能**: 将用户输入的字符串列表解析为Feature对象
+
+```cpp
+vector<Feature> parseFeatureList(const vector<string>& input_list);
+```
+
+**参数**:
+- `input_list`: 用户输入的字符串列表
+
+**返回值**: `vector<Feature>` - 解析后的特征列表
+
+**解析规则**:
+- **包含冒号**: `"name:apple"` → `Feature("name", "apple")` (精确匹配)
+- **不含冒号**: `"red"` → `Feature("", "red")` (模糊匹配)
+
+**示例**:
+```cpp
+// 输入: ["red", "name:apple", "green"]
+// 输出:
+// [
+//   Feature("", "red"),
+//   Feature("name", "apple"),
+//   Feature("", "green")
+// ]
+```
+
 ## 当前实现状态
 
 - ✅ 基础数据结构定义完成
-- ⏳ 正在实现 loadConceptDatabase 临时测试函数
-- ⏸️ 待实现 parseFeatureList 用户输入解析函数
-- ⏸️ 待测试数据加载和解析功能
+- ✅ ObjectBox数据库集成完成
+- ✅ 概念数据加载和存储完成
+- ✅ 基础查询功能实现（按值查询、按键值对查询）
+- ✅ 用户输入解析功能完成
+- ✅ **Stage 2 第一部分**: 概念匹配功能完成
+  - ✅ `matchConceptExact` - 单个概念匹配
+  - ✅ `findMatchingConcepts` - 批量概念匹配
+  - ✅ 匹配功能测试和验证完成
+- ✅ **Stage 2 已完成**:
+  - ✅ `analyzeOverlap` - 分析两个匹配结果的重合（基于重合度等级）
+  - ✅ `calculatePartialSimilarity` - 计算分相似度
+  - ✅ `calculateMainSimilarity` - 计算主相似度（几何平均数）
+  - ✅ `calculateMatchLevel` - 计算重合度等级（1-5）
 
 ## 概念库格式
 
@@ -184,5 +287,51 @@ sample2.confidence = 0.8;  // 80%确信
 3.[name:apple,color:green,position:shop]
 4.[name:book,color:red,content:travel]
 ```
+
+## 算法更新记录
+
+### 2025-10-06: 重合度百分比算法重构
+
+**重要变更**：相似度计算算法从"匹配特征数"改为"重合度百分比等级"
+
+#### 核心改进
+
+1. **重合度等级计算**
+   - 重合度 = 匹配特征数 / 总特征数 × 100%
+   - 向上取整到20%档次：20%, 40%, 60%, 80%, 100%
+   - 对应等级：1, 2, 3, 4, 5
+
+2. **参数表扩展**
+   - 从 p11-p33 扩展到 p11-p55
+   - 支持所有重合度等级组合
+   - 更精细的相似度权重控制
+
+3. **主相似度优化**
+   - 改为几何平均数：√(A分相似度 × B分相似度)
+   - 避免单方向低相似度严重拖累总体
+   - 结果更平衡和直观
+
+4. **交互式界面**
+   - 支持逗号分隔的多特征输入
+   - 实时计算并显示分相似度和主相似度
+   - 格式：[A]->[B], [A]<-[B], [A]<->[B]
+
+#### 新算法流程
+
+1. **特征解析**：解析逗号分隔的用户输入
+2. **概念匹配**：在数据库中查找匹配的概念
+3. **重合度计算**：计算每个重合概念的A、B重合度等级
+4. **分相似度**：Σ(概念数 × p_ij) / 总匹配概念数
+5. **主相似度**：√(A分相似度 × B分相似度)
+
+#### 技术实现
+
+- 新增 `calculateMatchLevel()` 函数
+- 重写 `analyzeOverlap()` 支持重合度等级
+- 更新 `calculatePartialSimilarity()` 使用新参数
+- 修改 `calculateMainSimilarity()` 应用开根号
+- 扩展参数表到25个p参数（p11-p55）
+
+此更新使相似度计算更加合理，能够更好地反映概念间的真实相似程度。
 
 每行格式：`ID.[key1:value1,key2:value2,...]`

@@ -3,6 +3,7 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <cmath>
 
 using namespace std;
 
@@ -196,6 +197,44 @@ void ConceptDatabase::printStatistics() {
     }
 }
 
+// 全局pij参数配置
+unordered_map<string, double> g_similarity_params = {
+    // 等级1 (20%重合度)
+    {"p11", 1.0},   // 双方都是20%重合度
+    {"p12", 0.9},   // A:20%, B:40%
+    {"p13", 0.8},   // A:20%, B:60%
+    {"p14", 0.7},   // A:20%, B:80%
+    {"p15", 0.6},   // A:20%, B:100%
+
+    // 等级2 (40%重合度)
+    {"p21", 0.9},   // A:40%, B:20%
+    {"p22", 1.2},   // A:40%, B:40%
+    {"p23", 1.1},   // A:40%, B:60%
+    {"p24", 1.0},   // A:40%, B:80%
+    {"p25", 0.9},   // A:40%, B:100%
+
+    // 等级3 (60%重合度)
+    {"p31", 0.8},   // A:60%, B:20%
+    {"p32", 1.1},   // A:60%, B:40%
+    {"p33", 1.5},   // A:60%, B:60%
+    {"p34", 1.4},   // A:60%, B:80%
+    {"p35", 1.3},   // A:60%, B:100%
+
+    // 等级4 (80%重合度)
+    {"p41", 0.7},   // A:80%, B:20%
+    {"p42", 1.0},   // A:80%, B:40%
+    {"p43", 1.4},   // A:80%, B:60%
+    {"p44", 1.8},   // A:80%, B:80%
+    {"p45", 1.7},   // A:80%, B:100%
+
+    // 等级5 (100%重合度)
+    {"p51", 0.6},   // A:100%, B:20%
+    {"p52", 0.9},   // A:100%, B:40%
+    {"p53", 1.3},   // A:100%, B:60%
+    {"p54", 1.7},   // A:100%, B:80%
+    {"p55", 2.0}    // A:100%, B:100%
+};
+
 // Stage 2: 概念匹配和相似度计算功能
 
 MatchResult ConceptDatabase::matchConceptExact(const vector<Feature>& input_features, const unique_ptr<Concept>& concept) {
@@ -276,4 +315,116 @@ vector<Feature> parseFeatureList(const vector<string>& input_list) {
     }
 
     return features;
+}
+
+map<pair<int,int>, int> ConceptDatabase::analyzeOverlap(const vector<MatchResult>& matches_A, const vector<MatchResult>& matches_B, int total_features_A, int total_features_B, int& total_matches) {
+    map<pair<int,int>, int> overlap_map;
+    total_matches = 0;
+
+    // 构建matches_B的概念ID到匹配数的映射，便于快速查找
+    unordered_map<obx_id, int> matches_B_map;
+    for (const auto& match_B : matches_B) {
+        matches_B_map[match_B.concept_id] = match_B.match_count;
+    }
+
+    // 遍历matches_A，查找重合的概念
+    for (const auto& match_A : matches_A) {
+        auto it = matches_B_map.find(match_A.concept_id);
+        if (it != matches_B_map.end()) {
+            // 找到重合概念
+            int match_count_A = match_A.match_count;
+            int match_count_B = it->second;
+
+            // 计算重合度等级
+            int level_A = calculateMatchLevel(match_count_A, total_features_A);
+            int level_B = calculateMatchLevel(match_count_B, total_features_B);
+
+            pair<int,int> level_pair(level_A, level_B);
+            overlap_map[level_pair]++;
+            total_matches++;
+        }
+    }
+
+    return overlap_map;
+}
+
+double ConceptDatabase::calculatePartialSimilarity(const map<pair<int,int>, int>& overlap_map, int divisor, const unordered_map<string, double>& params) {
+    if (divisor == 0) {
+        return 0.0;
+    }
+
+    double weighted_sum = 0.0;
+
+    for (const auto& entry : overlap_map) {
+        int level_A = entry.first.first;
+        int level_B = entry.first.second;
+        int concept_count = entry.second;
+
+        // 构建参数键名，如"p25"（等级2和等级5）
+        string param_key = "p" + to_string(level_A) + to_string(level_B);
+
+        // 查找参数值，如果没有找到则使用默认值1.0
+        double param_value = 1.0;
+        auto param_it = params.find(param_key);
+        if (param_it != params.end()) {
+            param_value = param_it->second;
+        }
+
+        weighted_sum += concept_count * param_value;
+    }
+
+    return weighted_sum / divisor;
+}
+
+int ConceptDatabase::calculateMatchLevel(int matched_features, int total_features) {
+    if (total_features == 0 || matched_features <= 0) {
+        return 1; // 默认最低等级
+    }
+
+    // 计算重合度百分比
+    double match_percentage = (double)matched_features / total_features * 100.0;
+
+    // 向上取整到最近的20%档次，返回对应等级1-5
+    if (match_percentage <= 20.0) return 1;    // 0%-20% → 等级1
+    else if (match_percentage <= 40.0) return 2;    // 20%-40% → 等级2
+    else if (match_percentage <= 60.0) return 3;    // 40%-60% → 等级3
+    else if (match_percentage <= 80.0) return 4;    // 60%-80% → 等级4
+    else return 5;    // 80%-100% → 等级5
+}
+
+double ConceptDatabase::calculateMainSimilarity(const vector<Feature>& features_A, const vector<Feature>& features_B, const unordered_map<string, double>& params) {
+    // 1. 获取两个特征列表的匹配结果
+    auto matches_A = findMatchingConcepts(features_A);
+    auto matches_B = findMatchingConcepts(features_B);
+
+    // 获取总特征数
+    int total_features_A = features_A.size();
+    int total_features_B = features_B.size();
+
+    // 2. 分析重合（基于重合度等级）
+    int total_matches = 0;
+    auto overlap_map = analyzeOverlap(matches_A, matches_B, total_features_A, total_features_B, total_matches);
+
+    // 如果没有重合，相似度为0
+    if (total_matches == 0) {
+        return 0.0;
+    }
+
+    // 获取A和B各自的匹配概念数
+    int matches_A_count = matches_A.size();
+    int matches_B_count = matches_B.size();
+
+    // 3. 计算A的分相似度（除以A的匹配概念数）
+    double partial_similarity_A = calculatePartialSimilarity(overlap_map, matches_A_count, params);
+
+    // 4. 计算B的分相似度（需要交换i,j的视角，除以B的匹配概念数）
+    map<pair<int,int>, int> overlap_map_B;
+    for (const auto& entry : overlap_map) {
+        pair<int,int> swapped_pair(entry.first.second, entry.first.first);  // 交换i,j
+        overlap_map_B[swapped_pair] = entry.second;
+    }
+    double partial_similarity_B = calculatePartialSimilarity(overlap_map_B, matches_B_count, params);
+
+    // 5. 计算主相似度：两个分相似度乘积的平方根（几何平均数）
+    return sqrt(partial_similarity_A * partial_similarity_B);
 }

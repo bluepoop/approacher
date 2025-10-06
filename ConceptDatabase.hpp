@@ -3,6 +3,8 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <map>
+#include <unordered_map>
 #include "objectbox.hpp"
 #include "concepts.obx.hpp"
 #include "objectbox-model.h"
@@ -74,7 +76,22 @@ public:
 
     // 计算单个概念的匹配结果
     MatchResult matchConceptExact(const vector<Feature>& input_features, const unique_ptr<Concept>& concept);
+
+    // 分析两个匹配结果的重合情况（基于重合度等级）
+    map<pair<int,int>, int> analyzeOverlap(const vector<MatchResult>& matches_A, const vector<MatchResult>& matches_B, int total_features_A, int total_features_B, int& total_matches);
+
+    // 计算重合度等级（1-5，对应20%-100%）
+    int calculateMatchLevel(int matched_features, int total_features);
+
+    // 计算分相似度
+    double calculatePartialSimilarity(const map<pair<int,int>, int>& overlap_map, int divisor, const unordered_map<string, double>& params);
+
+    // 计算主相似度
+    double calculateMainSimilarity(const vector<Feature>& features_A, const vector<Feature>& features_B, const unordered_map<string, double>& params);
 };
+
+// 全局pij参数配置
+extern unordered_map<string, double> g_similarity_params;
 
 // 工具函数：解析用户输入特征列表
 vector<Feature> parseFeatureList(const vector<string>& input_list);

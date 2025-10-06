@@ -1,0 +1,4 @@
+1.[name:apple,color:red,position:home]
+2.[name:apple,color:red,position:shop]
+3.[name:apple,color:green,position:shop]
+4.[name:book,color:red,content:travel]
