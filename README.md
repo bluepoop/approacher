@@ -334,4 +334,93 @@ vector<Feature> parseFeatureList(const vector<string>& input_list);
 
 此更新使相似度计算更加合理，能够更好地反映概念间的真实相似程度。
 
+### 2025-10-11: 第三阶段模糊匹配和参数学习系统
+
+**重要扩展**：实现了高级模糊匹配和参数学习功能，大幅提升系统智能化水平
+
+#### 核心新功能
+
+1. **字符串模糊匹配**
+   - 实现 Levenshtein 编辑距离算法
+   - 支持字符串相似度计算（0-1评分）
+   - 可配置相似度阈值（默认0.6）
+
+2. **递归匹配机制**
+   - 支持多层递归查找相似概念
+   - 可配置递归深度（默认2层）
+   - 匹配强度随递归深度衰减
+
+3. **参数学习优化**
+   - 基于用户反馈的训练样本收集
+   - 数值梯度下降参数优化算法
+   - 支持信心度加权的误差计算
+   - 参数范围约束（0.1-5.0）
+
+4. **参数持久化**
+   - 参数文件保存/加载功能
+   - 注释格式的可读配置文件
+   - 参数版本管理支持
+
+5. **交互式界面增强**
+   - 'fuzzy' 命令切换模糊匹配模式
+   - 'params' 命令进入参数学习
+   - 'save'/'load' 命令管理参数
+   - 详细的匹配信息显示
+
+#### 技术架构
+
+**新增函数列表**：
+```cpp
+// 模糊匹配核心
+int calculateStringDistance(str1, str2)           // 编辑距离
+double calculateStringSimilarity(str1, str2)      // 相似度计算
+vector<pair<string,double>> findSimilarValues()   // 模糊查找
+MatchResult matchConceptFuzzy()                   // 模糊概念匹配
+vector<MatchResult> recursiveMatch()              // 递归匹配
+
+// 参数学习系统
+void addTrainingSample(sample)                    // 添加训练样本
+void optimizeParameters()                         // 参数优化
+double evaluateParameters(params)                 // 参数评估
+bool saveParameters(filename)                     // 保存参数
+bool loadParameters(filename)                     // 加载参数
+
+// 增强的匹配函数
+vector<MatchResult> findMatchingConcepts()        // 支持模糊匹配重载
+```
+
+#### 使用示例
+
+**模糊匹配模式**：
+```bash
+输入对象A: fuzzy          # 切换到模糊匹配
+模糊匹配模式: 开启
+输入对象A: red            # 能匹配 "reed", "read" 等相似词
+输入对象B: book           # 能匹配 "books", "booking" 等
+匹配模式: 模糊匹配
+匹配概念数 - A: 12, B: 4, 重合: 4
+```
+
+**参数学习模式**：
+```bash
+输入对象A: params         # 进入参数学习
+输入训练样本数量: 2
+--- 训练样本 1 ---
+输入对象A: red,apple
+输入对象B: green,apple
+期望相似度 (0-1): 0.8
+信心度 (0-1): 0.9
+开始参数优化...
+```
+
+#### 技术特性
+
+- **智能匹配**：从纯精确匹配升级为智能模糊匹配
+- **自适应学习**：根据用户反馈自动优化参数
+- **多层递归**：支持概念间的深度关联发现
+- **配置管理**：灵活的参数保存和版本控制
+- **用户友好**：直观的交互命令和详细结果显示
+
+第三阶段的实现使Approacher从基础相似度计算工具发展为具备学习能力的智能概念分析系统。
+
 每行格式：`ID.[key1:value1,key2:value2,...]`

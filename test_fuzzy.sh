@@ -1,0 +1,6 @@
+#!/bin/bash
+export LD_LIBRARY_PATH="/home/laplace/approacher/lib:$LD_LIBRARY_PATH"
+echo "fuzzy"
+echo "reed"
+echo "apples"
+echo "quit"

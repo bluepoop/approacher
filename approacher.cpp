@@ -57,15 +57,95 @@ int main()
     cout << "输入格式: 第一行输入对象A (逗号分隔特征), 第二行输入对象B" << endl;
     cout << "例如: red,apple" << endl;
     cout << "      green,book" << endl;
-    cout << "输入 'quit' 或 'exit' 退出程序" << endl;
+    cout << "特殊命令:" << endl;
+    cout << "  'fuzzy' - 切换模糊匹配模式" << endl;
+    cout << "  'params' - 参数学习模式" << endl;
+    cout << "  'save' - 保存参数" << endl;
+    cout << "  'load' - 加载参数" << endl;
+    cout << "  'quit' 或 'exit' - 退出程序" << endl;
+
+    bool use_fuzzy_matching = false;
+    double fuzzy_threshold = 0.6;
+    int recursive_depth = 2;
 
     string line_a, line_b;
     while (true) {
         cout << "\n输入对象A: ";
         if (!getline(cin, line_a)) break;
 
-        // 检查退出命令
-        if (line_a == "quit" || line_a == "exit") break;
+        // 检查特殊命令
+        if (line_a == "quit" || line_a == "exit") {
+            break;
+        } else if (line_a == "fuzzy") {
+            use_fuzzy_matching = !use_fuzzy_matching;
+            cout << "模糊匹配模式: " << (use_fuzzy_matching ? "开启" : "关闭") << endl;
+            if (use_fuzzy_matching) {
+                cout << "模糊阈值: " << fuzzy_threshold << ", 递归深度: " << recursive_depth << endl;
+            }
+            continue;
+        } else if (line_a == "params") {
+            cout << "进入参数学习模式..." << endl;
+            cout << "输入训练样本数量: ";
+            string count_str;
+            if (getline(cin, count_str)) {
+                try {
+                    int sample_count = stoi(count_str);
+                    for (int i = 0; i < sample_count; i++) {
+                        cout << "\n--- 训练样本 " << (i+1) << " ---" << endl;
+                        cout << "输入对象A: ";
+                        string train_a;
+                        if (!getline(cin, train_a)) break;
+
+                        cout << "输入对象B: ";
+                        string train_b;
+                        if (!getline(cin, train_b)) break;
+
+                        cout << "期望相似度 (0-1): ";
+                        string similarity_str;
+                        if (!getline(cin, similarity_str)) break;
+
+                        cout << "信心度 (0-1): ";
+                        string confidence_str;
+                        if (!getline(cin, confidence_str)) break;
+
+                        try {
+                            double expected_sim = stod(similarity_str);
+                            double confidence = stod(confidence_str);
+
+                            auto features_a = parseFeatureList(parseCommaInput(train_a));
+                            auto features_b = parseFeatureList(parseCommaInput(train_b));
+
+                            TrainingSample sample;
+                            sample.features_A = features_a;
+                            sample.features_B = features_b;
+                            sample.expected_similarity = expected_sim;
+                            sample.confidence = confidence;
+
+                            g_database->addTrainingSample(sample);
+                            cout << "样本已添加" << endl;
+                        } catch (const exception& e) {
+                            cout << "输入格式错误: " << e.what() << endl;
+                        }
+                    }
+
+                    cout << "\n开始参数优化..." << endl;
+                    g_database->optimizeParameters();
+                } catch (const exception& e) {
+                    cout << "输入错误: " << e.what() << endl;
+                }
+            }
+            continue;
+        } else if (line_a == "save") {
+            if (g_database->saveParameters()) {
+                cout << "参数保存成功" << endl;
+            }
+            continue;
+        } else if (line_a == "load") {
+            if (g_database->loadParameters()) {
+                cout << "参数加载成功" << endl;
+            }
+            continue;
+        }
 
         cout << "输入对象B: ";
         if (!getline(cin, line_b)) break;
@@ -95,8 +175,8 @@ int main()
         }
 
         // 为了显示分相似度，还是需要手动计算一次
-        auto matches_a = g_database->findMatchingConcepts(features_a);
-        auto matches_b = g_database->findMatchingConcepts(features_b);
+        auto matches_a = g_database->findMatchingConcepts(features_a, use_fuzzy_matching, fuzzy_threshold, recursive_depth);
+        auto matches_b = g_database->findMatchingConcepts(features_b, use_fuzzy_matching, fuzzy_threshold, recursive_depth);
         int total_matches = 0;
         auto overlap_map = g_database->analyzeOverlap(matches_a, matches_b, features_a.size(), features_b.size(), total_matches);
 
@@ -124,6 +204,12 @@ int main()
         display_b += "]";
 
         // 输出结果
+        cout << "\n=== 计算结果 ===" << endl;
+        cout << "匹配模式: " << (use_fuzzy_matching ? "模糊匹配" : "精确匹配") << endl;
+        if (use_fuzzy_matching) {
+            cout << "模糊阈值: " << fuzzy_threshold << ", 递归深度: " << recursive_depth << endl;
+        }
+        cout << "匹配概念数 - A: " << matches_a.size() << ", B: " << matches_b.size() << ", 重合: " << total_matches << endl;
         cout << display_a << "->" << display_b << " : " << partial_a_to_b << endl;
         cout << display_a << "<-" << display_b << " : " << partial_b_to_a << endl;
         cout << display_a << "<->" << display_b << " : " << main_similarity << endl;

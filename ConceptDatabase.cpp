@@ -4,6 +4,8 @@
 #include <fstream>
 #include <sstream>
 #include <cmath>
+#include <set>
+#include <algorithm>
 
 using namespace std;
 
@@ -297,6 +299,37 @@ vector<MatchResult> ConceptDatabase::findMatchingConcepts(const vector<Feature>&
     return results;
 }
 
+vector<MatchResult> ConceptDatabase::findMatchingConcepts(const vector<Feature>& input_features, bool use_fuzzy_matching, double fuzzy_threshold, int max_recursive_depth) {
+    if (!use_fuzzy_matching) {
+        // 使用精确匹配
+        return findMatchingConcepts(input_features);
+    }
+
+    if (max_recursive_depth > 1) {
+        // 使用递归模糊匹配
+        return recursiveMatch(input_features, max_recursive_depth, fuzzy_threshold);
+    } else {
+        // 使用简单模糊匹配
+        vector<MatchResult> results;
+
+        try {
+            auto all_concepts = conceptBox->getAll();
+
+            for (auto& concept : all_concepts) {
+                MatchResult match_result = matchConceptFuzzy(input_features, concept, fuzzy_threshold);
+
+                if (match_result.match_count > 0) {
+                    results.push_back(match_result);
+                }
+            }
+        } catch (const exception& e) {
+            cerr << "模糊匹配查找失败: " << e.what() << endl;
+        }
+
+        return results;
+    }
+}
+
 // 工具函数：解析用户输入特征列表
 vector<Feature> parseFeatureList(const vector<string>& input_list) {
     vector<Feature> features;
@@ -427,4 +460,389 @@ double ConceptDatabase::calculateMainSimilarity(const vector<Feature>& features_
 
     // 5. 计算主相似度：两个分相似度乘积的平方根（几何平均数）
     return sqrt(partial_similarity_A * partial_similarity_B);
+}
+
+// Stage 3: 模糊匹配和参数学习功能
+
+int ConceptDatabase::calculateStringDistance(const string& str1, const string& str2) {
+    int m = str1.length();
+    int n = str2.length();
+
+    // 创建动态规划矩阵
+    vector<vector<int>> dp(m + 1, vector<int>(n + 1));
+
+    // 初始化边界条件
+    for (int i = 0; i <= m; i++) {
+        dp[i][0] = i;
+    }
+    for (int j = 0; j <= n; j++) {
+        dp[0][j] = j;
+    }
+
+    // 填充动态规划矩阵
+    for (int i = 1; i <= m; i++) {
+        for (int j = 1; j <= n; j++) {
+            if (str1[i-1] == str2[j-1]) {
+                dp[i][j] = dp[i-1][j-1];  // 字符相同，无需操作
+            } else {
+                dp[i][j] = 1 + min({
+                    dp[i-1][j],     // 删除
+                    dp[i][j-1],     // 插入
+                    dp[i-1][j-1]    // 替换
+                });
+            }
+        }
+    }
+
+    return dp[m][n];
+}
+
+double ConceptDatabase::calculateStringSimilarity(const string& str1, const string& str2) {
+    if (str1.empty() && str2.empty()) {
+        return 1.0;  // 两个空字符串相似度为1
+    }
+    if (str1.empty() || str2.empty()) {
+        return 0.0;  // 一个空一个非空，相似度为0
+    }
+
+    int edit_distance = calculateStringDistance(str1, str2);
+    int max_length = max(str1.length(), str2.length());
+
+    // 相似度 = 1 - (编辑距离 / 最大长度)
+    return 1.0 - (double)edit_distance / max_length;
+}
+
+vector<pair<string, double>> ConceptDatabase::findSimilarValues(const string& query_value, double min_similarity) {
+    vector<pair<string, double>> similar_values;
+
+    try {
+        // 获取所有概念
+        auto all_concepts = conceptBox->getAll();
+
+        // 用集合去重
+        set<string> unique_values;
+        for (auto& concept : all_concepts) {
+            for (const auto& value : concept->feature_values) {
+                unique_values.insert(value);
+            }
+        }
+
+        // 计算每个值的相似度
+        for (const string& value : unique_values) {
+            double similarity = calculateStringSimilarity(query_value, value);
+            if (similarity >= min_similarity) {
+                similar_values.push_back(make_pair(value, similarity));
+            }
+        }
+
+        // 按相似度降序排列
+        sort(similar_values.begin(), similar_values.end(),
+             [](const pair<string, double>& a, const pair<string, double>& b) {
+                 return a.second > b.second;
+             });
+
+    } catch (const exception& e) {
+        cerr << "模糊查找失败: " << e.what() << endl;
+    }
+
+    return similar_values;
+}
+
+MatchResult ConceptDatabase::matchConceptFuzzy(const vector<Feature>& input_features, const unique_ptr<Concept>& concept, double fuzzy_threshold) {
+    MatchResult result;
+    result.concept_id = concept->id;
+    result.match_count = 0;
+
+    // 遍历每个输入特征
+    for (size_t i = 0; i < input_features.size(); i++) {
+        const Feature& input_feature = input_features[i];
+        bool matched = false;
+        double best_similarity = 0.0;
+
+        if (input_feature.key.empty()) {
+            // 模糊匹配：在所有值中找最相似的
+            for (const auto& concept_value : concept->feature_values) {
+                double similarity = calculateStringSimilarity(input_feature.value, concept_value);
+                if (similarity >= fuzzy_threshold && similarity > best_similarity) {
+                    best_similarity = similarity;
+                    matched = true;
+                }
+            }
+        } else {
+            // 精确匹配键，模糊匹配值
+            for (size_t j = 0; j < concept->feature_keys.size(); j++) {
+                if (concept->feature_keys[j] == input_feature.key) {
+                    double similarity = calculateStringSimilarity(input_feature.value, concept->feature_values[j]);
+                    if (similarity >= fuzzy_threshold && similarity > best_similarity) {
+                        best_similarity = similarity;
+                        matched = true;
+                    }
+                }
+            }
+        }
+
+        if (matched) {
+            result.match_count++;
+            result.matched_indices.push_back(i);
+        }
+    }
+
+    return result;
+}
+
+vector<MatchResult> ConceptDatabase::recursiveMatch(const vector<Feature>& input_features, int max_depth, double fuzzy_threshold) {
+    vector<MatchResult> results;
+
+    try {
+        // 获取所有概念
+        auto all_concepts = conceptBox->getAll();
+
+        for (auto& concept : all_concepts) {
+            // 第一层：直接匹配
+            MatchResult direct_match = matchConceptFuzzy(input_features, concept, fuzzy_threshold);
+
+            if (direct_match.match_count > 0) {
+                results.push_back(direct_match);
+            } else if (max_depth > 1) {
+                // 递归匹配：通过相似值查找
+                bool found_recursive_match = false;
+
+                for (const Feature& input_feature : input_features) {
+                    if (found_recursive_match) break;
+
+                    // 查找相似值
+                    auto similar_values = findSimilarValues(input_feature.value, fuzzy_threshold);
+
+                    for (const auto& similar_pair : similar_values) {
+                        // 创建新的特征列表，使用相似值替换
+                        vector<Feature> modified_features = input_features;
+                        for (Feature& feature : modified_features) {
+                            if (feature.value == input_feature.value) {
+                                feature.value = similar_pair.first;
+                            }
+                        }
+
+                        // 递归匹配（深度减1）
+                        auto recursive_results = recursiveMatch(modified_features, max_depth - 1, fuzzy_threshold);
+
+                        if (!recursive_results.empty()) {
+                            // 找到递归匹配，调整匹配强度
+                            for (MatchResult& recursive_result : recursive_results) {
+                                // 递归匹配的强度会衰减
+                                recursive_result.match_count = max(1, recursive_result.match_count / 2);
+                                results.push_back(recursive_result);
+                                found_recursive_match = true;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 去重和排序
+        sort(results.begin(), results.end(),
+             [](const MatchResult& a, const MatchResult& b) {
+                 if (a.concept_id == b.concept_id) {
+                     return a.match_count > b.match_count;
+                 }
+                 return a.concept_id < b.concept_id;
+             });
+
+        // 去除重复的概念ID（保留匹配度最高的）
+        auto last = unique(results.begin(), results.end(),
+                          [](const MatchResult& a, const MatchResult& b) {
+                              return a.concept_id == b.concept_id;
+                          });
+        results.erase(last, results.end());
+
+    } catch (const exception& e) {
+        cerr << "递归匹配失败: " << e.what() << endl;
+    }
+
+    return results;
+}
+
+// 训练样本管理
+void ConceptDatabase::addTrainingSample(const TrainingSample& sample) {
+    training_samples.push_back(sample);
+}
+
+vector<TrainingSample> ConceptDatabase::getTrainingSamples() {
+    return training_samples;
+}
+
+void ConceptDatabase::clearTrainingSamples() {
+    training_samples.clear();
+}
+
+// 参数优化
+double ConceptDatabase::evaluateParameters(const unordered_map<string, double>& params) {
+    if (training_samples.empty()) {
+        return 1.0;  // 没有训练样本，返回默认评分
+    }
+
+    double total_error = 0.0;
+    double total_weight = 0.0;
+
+    for (const TrainingSample& sample : training_samples) {
+        // 计算当前参数下的相似度
+        double calculated_similarity = calculateMainSimilarity(sample.features_A, sample.features_B, params);
+
+        // 计算误差（考虑信心度权重）
+        double error = abs(calculated_similarity - sample.expected_similarity);
+        double weight = sample.confidence;
+
+        total_error += error * weight;
+        total_weight += weight;
+    }
+
+    // 返回平均加权误差的倒数（越小越好，所以取倒数）
+    double average_error = total_weight > 0 ? total_error / total_weight : 1.0;
+    return 1.0 / (1.0 + average_error);  // 转换为0-1之间的评分
+}
+
+void ConceptDatabase::optimizeParameters(int max_iterations, double learning_rate) {
+    if (training_samples.empty()) {
+        cout << "没有训练样本，无法优化参数" << endl;
+        return;
+    }
+
+    cout << "开始参数优化，迭代次数: " << max_iterations << endl;
+
+    // 备份当前参数
+    unordered_map<string, double> best_params = g_similarity_params;
+    double best_score = evaluateParameters(best_params);
+
+    cout << "初始评分: " << best_score << endl;
+
+    for (int iteration = 0; iteration < max_iterations; iteration++) {
+        // 对每个参数进行梯度下降
+        for (auto& param_pair : g_similarity_params) {
+            string param_name = param_pair.first;
+            double current_value = param_pair.second;
+
+            // 计算数值梯度
+            const double epsilon = 0.001;
+
+            // 正向扰动
+            g_similarity_params[param_name] = current_value + epsilon;
+            double score_plus = evaluateParameters(g_similarity_params);
+
+            // 负向扰动
+            g_similarity_params[param_name] = current_value - epsilon;
+            double score_minus = evaluateParameters(g_similarity_params);
+
+            // 计算梯度
+            double gradient = (score_plus - score_minus) / (2.0 * epsilon);
+
+            // 更新参数（梯度上升，因为我们要最大化评分）
+            double new_value = current_value + learning_rate * gradient;
+
+            // 约束参数在合理范围内
+            new_value = max(0.1, min(5.0, new_value));
+
+            g_similarity_params[param_name] = new_value;
+        }
+
+        // 评估新参数
+        double current_score = evaluateParameters(g_similarity_params);
+
+        // 如果有改进，更新最佳参数
+        if (current_score > best_score) {
+            best_params = g_similarity_params;
+            best_score = current_score;
+        }
+
+        // 每10次迭代输出进度
+        if ((iteration + 1) % 10 == 0) {
+            cout << "迭代 " << (iteration + 1) << " - 当前评分: " << current_score
+                 << " - 最佳评分: " << best_score << endl;
+        }
+    }
+
+    // 应用最佳参数
+    g_similarity_params = best_params;
+    cout << "参数优化完成，最终评分: " << best_score << endl;
+}
+
+// 参数持久化
+bool ConceptDatabase::saveParameters(const string& filename) {
+    try {
+        ofstream file(filename);
+        if (!file.is_open()) {
+            cerr << "无法打开文件进行写入: " << filename << endl;
+            return false;
+        }
+
+        file << "# Approacher相似度参数文件" << endl;
+        file << "# 格式: 参数名=值" << endl;
+        file << endl;
+
+        // 按参数名排序保存
+        vector<pair<string, double>> sorted_params(g_similarity_params.begin(), g_similarity_params.end());
+        sort(sorted_params.begin(), sorted_params.end());
+
+        for (const auto& param : sorted_params) {
+            file << param.first << "=" << param.second << endl;
+        }
+
+        file.close();
+        cout << "参数已保存到 " << filename << endl;
+        return true;
+
+    } catch (const exception& e) {
+        cerr << "保存参数失败: " << e.what() << endl;
+        return false;
+    }
+}
+
+bool ConceptDatabase::loadParameters(const string& filename) {
+    try {
+        ifstream file(filename);
+        if (!file.is_open()) {
+            cerr << "无法打开参数文件: " << filename << endl;
+            return false;
+        }
+
+        string line;
+        int loaded_count = 0;
+
+        while (getline(file, line)) {
+            // 跳过注释和空行
+            if (line.empty() || line[0] == '#') {
+                continue;
+            }
+
+            // 查找等号
+            size_t eq_pos = line.find('=');
+            if (eq_pos == string::npos) {
+                continue;
+            }
+
+            // 提取参数名和值
+            string param_name = line.substr(0, eq_pos);
+            string value_str = line.substr(eq_pos + 1);
+
+            // 去除空格
+            param_name.erase(remove_if(param_name.begin(), param_name.end(), ::isspace), param_name.end());
+            value_str.erase(remove_if(value_str.begin(), value_str.end(), ::isspace), value_str.end());
+
+            try {
+                double value = stod(value_str);
+                g_similarity_params[param_name] = value;
+                loaded_count++;
+            } catch (const invalid_argument& e) {
+                cerr << "警告：参数值格式错误，跳过：" << line << endl;
+            }
+        }
+
+        file.close();
+        cout << "从 " << filename << " 成功加载了 " << loaded_count << " 个参数" << endl;
+        return loaded_count > 0;
+
+    } catch (const exception& e) {
+        cerr << "加载参数失败: " << e.what() << endl;
+        return false;
+    }
 }

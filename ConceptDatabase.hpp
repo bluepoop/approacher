@@ -5,6 +5,7 @@
 #include <memory>
 #include <map>
 #include <unordered_map>
+#include <algorithm>
 #include "objectbox.hpp"
 #include "concepts.obx.hpp"
 #include "objectbox-model.h"
@@ -46,6 +47,7 @@ class ConceptDatabase {
 private:
     unique_ptr<obx::Store> store;
     unique_ptr<obx::Box<Concept>> conceptBox;
+    vector<TrainingSample> training_samples;  // 训练样本存储
 
 public:
     // 初始化数据库
@@ -71,8 +73,11 @@ public:
 
     // Stage 2: 概念匹配和相似度计算功能
 
-    // 根据特征列表查找匹配的概念
+    // 根据特征列表查找匹配的概念（精确匹配）
     vector<MatchResult> findMatchingConcepts(const vector<Feature>& input_features);
+
+    // 根据特征列表查找匹配的概念（支持模糊匹配）
+    vector<MatchResult> findMatchingConcepts(const vector<Feature>& input_features, bool use_fuzzy_matching, double fuzzy_threshold = 0.6, int max_recursive_depth = 2);
 
     // 计算单个概念的匹配结果
     MatchResult matchConceptExact(const vector<Feature>& input_features, const unique_ptr<Concept>& concept);
@@ -88,6 +93,36 @@ public:
 
     // 计算主相似度
     double calculateMainSimilarity(const vector<Feature>& features_A, const vector<Feature>& features_B, const unordered_map<string, double>& params);
+
+    // Stage 3: 模糊匹配和参数学习功能
+
+    // 计算字符串编辑距离（Levenshtein距离）
+    int calculateStringDistance(const string& str1, const string& str2);
+
+    // 计算字符串相似度（0-1之间）
+    double calculateStringSimilarity(const string& str1, const string& str2);
+
+    // 模糊查找相似值
+    vector<pair<string, double>> findSimilarValues(const string& query_value, double min_similarity = 0.6);
+
+    // 支持模糊匹配的概念匹配
+    MatchResult matchConceptFuzzy(const vector<Feature>& input_features, const unique_ptr<Concept>& concept, double fuzzy_threshold = 0.6);
+
+    // 递归匹配功能（支持深度限制）
+    vector<MatchResult> recursiveMatch(const vector<Feature>& input_features, int max_depth = 2, double fuzzy_threshold = 0.6);
+
+    // 训练样本管理
+    void addTrainingSample(const TrainingSample& sample);
+    vector<TrainingSample> getTrainingSamples();
+    void clearTrainingSamples();
+
+    // 参数优化
+    void optimizeParameters(int max_iterations = 100, double learning_rate = 0.01);
+    double evaluateParameters(const unordered_map<string, double>& params);
+
+    // 参数持久化
+    bool saveParameters(const string& filename = "parameters.txt");
+    bool loadParameters(const string& filename = "parameters.txt");
 };
 
 // 全局pij参数配置
