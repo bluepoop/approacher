@@ -566,4 +566,94 @@ else if (line_a == "params") {
 
 这些争议点和改进建议为Approacher的持续发展提供了明确的技术路线图，同时也为开源贡献者提供了参与方向。
 
+## 🗂️ 项目结构和部署
+
+### 目录结构
+
+```
+~/approacher/                    # 主项目目录
+├── approacher.cpp              # 主程序文件
+├── compile_with_things.sh      # 编译脚本
+├── test_*.sh                   # 测试脚本
+└── README.md                   # 项目文档
+
+~/things/                       # 共享数据库目录
+├── ConceptDatabase.hpp         # 数据库类头文件
+├── ConceptDatabase.cpp         # 数据库类实现
+├── concepts.obx.hpp/.cpp       # ObjectBox生成文件
+├── objectbox-model.h           # ObjectBox模型定义
+├── example.txt                 # 示例概念数据
+├── parameters.txt              # 参数配置文件（自动生成）
+├── concepts-db/                # ObjectBox数据库文件
+│   ├── data.mdb
+│   └── lock.mdb
+├── include/                    # ObjectBox头文件
+│   └── objectbox.hpp
+└── lib/                        # ObjectBox动态库
+    └── libobjectbox.so
+```
+
+### 🚀 编译和运行
+
+#### 方法1：使用编译脚本（推荐）
+```bash
+# 编译程序
+./compile_with_things.sh
+
+# 运行程序
+LD_LIBRARY_PATH="/home/laplace/things/lib" ./approacher
+```
+
+#### 方法2：手动编译
+```bash
+# 编译命令
+g++ -std=c++17 \
+    -I/home/laplace/things/include \
+    -L/home/laplace/things/lib \
+    -o approacher \
+    approacher.cpp \
+    /home/laplace/things/ConceptDatabase.cpp \
+    /home/laplace/things/concepts.obx.cpp \
+    -lobjectbox -pthread
+
+# 设置库路径并运行
+export LD_LIBRARY_PATH="/home/laplace/things/lib:$LD_LIBRARY_PATH"
+./approacher
+```
+
+### 🔗 数据库共享机制
+
+**优势**：
+- ✅ **全局共享**：`~/things` 目录下的数据库可被系统任意程序访问
+- ✅ **数据持久化**：概念数据和参数配置在程序重启后保留
+- ✅ **多程序协作**：不同项目可以使用相同的概念数据库
+- ✅ **统一管理**：所有概念分析工具共享一套参数和数据
+
+**访问方式**：
+```cpp
+// 任何程序都可以这样访问数据库
+ConceptDatabase db;
+db.initialize("/home/laplace/things/concepts-db");
+db.loadFromFile("/home/laplace/things/example.txt");
+```
+
+### 📂 文件说明
+
+| 文件 | 作用 | 位置 |
+|------|------|------|
+| **ConceptDatabase.hpp/cpp** | 数据库核心功能 | `~/things/` |
+| **concepts.obx.*** | ObjectBox自动生成 | `~/things/` |
+| **concepts-db/** | 数据库存储目录 | `~/things/` |
+| **example.txt** | 示例概念数据 | `~/things/` |
+| **parameters.txt** | 训练参数文件 | `~/things/`（自动生成）|
+| **include/lib/** | ObjectBox依赖 | `~/things/` |
+
+### 🔧 配置管理
+
+**参数文件位置**：`~/things/parameters.txt`
+**数据库位置**：`~/things/concepts-db/`
+**示例数据**：`~/things/example.txt`
+
+使用 `save` 和 `load` 命令可以方便地管理参数配置，所有设置都保存在 `~/things` 目录中，实现了真正的全局共享。
+
 每行格式：`ID.[key1:value1,key2:value2,...]`

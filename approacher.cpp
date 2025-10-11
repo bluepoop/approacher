@@ -6,7 +6,7 @@
 #include <sstream>
 #include <cmath>
 
-#include "ConceptDatabase.hpp"
+#include "/home/laplace/things/ConceptDatabase.hpp"
 
 using namespace std;
 
@@ -41,13 +41,13 @@ int main()
 
     // 初始化数据库
     g_database = make_unique<ConceptDatabase>();
-    if (!g_database->initialize()) {
+    if (!g_database->initialize("/home/laplace/things/concepts-db")) {
         cerr << "数据库初始化失败！" << endl;
         return 1;
     }
 
     // 加载测试数据
-    if (!g_database->loadFromFile("example.txt")) {
+    if (!g_database->loadFromFile("/home/laplace/things/example.txt")) {
         cerr << "加载测试数据失败！" << endl;
         return 1;
     }
@@ -136,12 +136,12 @@ int main()
             }
             continue;
         } else if (line_a == "save") {
-            if (g_database->saveParameters()) {
+            if (g_database->saveParameters("/home/laplace/things/parameters.txt")) {
                 cout << "参数保存成功" << endl;
             }
             continue;
         } else if (line_a == "load") {
-            if (g_database->loadParameters()) {
+            if (g_database->loadParameters("/home/laplace/things/parameters.txt")) {
                 cout << "参数加载成功" << endl;
             }
             continue;
