@@ -1,0 +1,8 @@
+1.[name:apple,color:red,position:home]
+2.[name:apple,color:red,position:shop]
+3.[name:apple,color:green,position:shop]
+4.[name:book,color:red,content:travel]
+5.[name:content,word_class:noun]
+6.[name:apple,word_class:noun]
+7.[name:sweet,word_class:adjective]
+8.[name:red,word_class:adjective]
