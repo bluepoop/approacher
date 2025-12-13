@@ -7,7 +7,7 @@
 #include <cstdlib>
 #include <fstream>
 
-#include "/home/laplace/things/ConceptDatabase.hpp"
+#include "things/ConceptDatabase.hpp"
 
 using namespace std;
 
@@ -503,8 +503,8 @@ string callApproacher(const string& input_a, const string& input_b) {
     temp_file.close();
 
     // 调用approacher程序
-    string command = "cd /home/laplace/approacher && ";
-    command += "export LD_LIBRARY_PATH='/home/laplace/things/lib:$LD_LIBRARY_PATH' && ";
+    string command = "cd . && ";
+    command += "export LD_LIBRARY_PATH='./things/lib:$LD_LIBRARY_PATH' && ";
     command += "./approacher < " + temp_input_file + " 2>&1";
 
     // 执行命令并获取输出
@@ -786,7 +786,7 @@ int main()
 
     // 初始化数据库连接用于语义分析
     g_semantic_database = make_unique<ConceptDatabase>();
-    if (!g_semantic_database->initialize("/home/laplace/things/concepts-db")) {
+    if (!g_semantic_database->initialize("things/concepts-db")) {
         cerr << "警告：无法连接到语义分析数据库，部分功能可能受限" << endl;
     } else {
         cout << "语义分析数据库连接成功" << endl;

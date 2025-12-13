@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Approacher编译脚本 - 使用~/things数据库
-echo "编译Approacher程序（使用~/things数据库）..."
+# Approacher编译脚本 - 使用本地things数据库
+echo "编译Approacher程序（使用本地things数据库）..."
 
 # 设置路径
-THINGS_DIR="/home/laplace/things"
+THINGS_DIR="./things"
 INCLUDE_DIR="$THINGS_DIR/include"
 LIB_DIR="$THINGS_DIR/lib"
 

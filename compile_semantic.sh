@@ -4,7 +4,7 @@
 echo "编译Semantic Approacher程序（语义增强版）..."
 
 # 设置路径
-THINGS_DIR="/home/laplace/things"
+THINGS_DIR="./things"
 INCLUDE_DIR="$THINGS_DIR/include"
 LIB_DIR="$THINGS_DIR/lib"
 

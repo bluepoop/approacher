@@ -290,6 +290,36 @@ vector<Feature> parseFeatureList(const vector<string>& input_list);
 
 ## 算法更新记录
 
+### 2024-12-13: 项目可移植性重构
+
+**重要变更**：将所有绝对路径修改为相对路径，实现项目完全可移植
+
+#### 核心改进
+
+1. **路径重构**
+   - 所有源码中的绝对路径(`/home/laplace/things/`) → 相对路径(`things/`)
+   - 编译脚本中的路径变量统一使用 `THINGS_DIR="./things"`
+   - 测试脚本中的库路径改为 `LD_LIBRARY_PATH="./things/lib"`
+
+2. **文件影响范围**
+   - **源文件**：`approacher.cpp`, `semantic_approacher.cpp`
+   - **编译脚本**：`compile_semantic.sh`, `compile_with_things.sh`
+   - **测试脚本**：`test_basic.sh`, `test_fuzzy.sh`, `test_fuzzy2.sh`
+
+3. **功能验证**
+   - ✅ 基本相似度计算功能正常
+   - ✅ 模糊匹配功能正常
+   - ✅ 参数学习和保存/加载功能正常
+   - ✅ Semantic Approacher 语义分析功能正常
+   - ✅ 等号键值对处理功能正常
+   - ✅ 所有测试脚本运行正常
+
+#### 移植性提升
+
+- **克隆即用**：仓库包含完整的 `things/` 目录，克隆后无需额外配置
+- **跨系统兼容**：不再依赖特定用户路径，可在任何系统上运行
+- **开发友好**：支持在不同目录下编译和运行
+
 ### 2025-10-06: 重合度百分比算法重构
 
 **重要变更**：相似度计算算法从"匹配特征数"改为"重合度百分比等级"
