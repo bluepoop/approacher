@@ -19,7 +19,7 @@ string extractKeyFromEqualsKeyValue(const string& input);
 string convertEqualsToColonKeyValue(const string& input);
 double handleEqualsKeyValueSpecialCases(const string& input_a, const string& input_b);
 void preprocessEqualsKeyValuePairs(const string& input_a, const string& input_b, string& processed_a, string& processed_b);
-string applyBackupPOSRules(const string& word);
+string applyBackupPOSRules(const string& word, bool quiet_mode = false);
 
 // 全局数据库实例
 unique_ptr<ConceptDatabase> g_semantic_database;
@@ -38,36 +38,41 @@ struct SemanticAnalysisResult {
 // =============================================================================
 
 /**
- * 从数据库查询词性信息（带备用规则）
- * 通过查询概念数据库中的word_class字段获取词性，如果失败则使用备用规则
- * @param word 待识别的单词
- * @return "adj" 形容词, "noun" 名词, "unknown" 未知
+ * Query part-of-speech information from database (with backup rules)
+ * Get POS by querying word_class field in concept database, fallback to backup rules if failed
+ * @param word The word to identify
+ * @param quiet_mode Whether to suppress debug output
+ * @return "adj" for adjective, "noun" for noun, "unknown" for unknown
  */
-string identifyPartOfSpeech(const string& word) {
+string identifyPartOfSpeech(const string& word, bool quiet_mode = false) {
     if (!g_semantic_database) {
-        return applyBackupPOSRules(word);
+        return applyBackupPOSRules(word, quiet_mode);
     }
 
     try {
-        // 获取所有概念
+        // Get all concepts
         auto all_concepts = g_semantic_database->getAllConcepts();
 
-        // 查找匹配的概念
+        // Search for matching concepts
         for (auto& concept : all_concepts) {
             for (size_t i = 0; i < concept->feature_keys.size(); i++) {
-                // 查找name字段匹配当前单词的概念
+                // Find concept with name field matching current word
                 if (concept->feature_keys[i] == "name" && concept->feature_values[i] == word) {
-                    // 在同一个概念中查找word_class字段
+                    // Search for word_class field in the same concept
                     for (size_t j = 0; j < concept->feature_keys.size(); j++) {
                         if (concept->feature_keys[j] == "word_class") {
                             string word_class = concept->feature_values[j];
 
-                            // 转换词性标记
+                            // Convert POS tags
                             if (word_class == "adjective") {
-                                cout << "[词性查询] \"" << word << "\" → 形容词 (数据库)" << endl;
+                                if (!quiet_mode) {
+                                    cout << "[POS Query] \"" << word << "\" → adjective (database)" << endl;
+                                }
                                 return "adj";
                             } else if (word_class == "noun") {
-                                cout << "[词性查询] \"" << word << "\" → 名词 (数据库)" << endl;
+                                if (!quiet_mode) {
+                                    cout << "[POS Query] \"" << word << "\" → noun (database)" << endl;
+                                }
                                 return "noun";
                             }
                         }
@@ -76,56 +81,73 @@ string identifyPartOfSpeech(const string& word) {
             }
         }
 
-        // 数据库中没有找到，使用备用规则
-        return applyBackupPOSRules(word);
+        // Not found in database, use backup rules
+        return applyBackupPOSRules(word, quiet_mode);
 
     } catch (const exception& e) {
-        cerr << "[词性查询] 查询失败: " << e.what() << endl;
-        return applyBackupPOSRules(word);
+        if (!quiet_mode) {
+            cerr << "[POS Query] Query failed: " << e.what() << endl;
+        }
+        return applyBackupPOSRules(word, quiet_mode);
     }
 }
 
 /**
- * 备用词性识别规则（当数据库查询失败时使用）
- * @param word 待识别的单词
- * @return "adj" 形容词, "noun" 名词, "unknown" 未知
+ * Backup part-of-speech identification rules (used when database query fails)
+ * @param word The word to identify
+ * @param quiet_mode Whether to suppress debug output
+ * @return "adj" for adjective, "noun" for noun, "unknown" for unknown
  */
-string applyBackupPOSRules(const string& word) {
-    // 中文形容词常见特征
-    if (word.find("的") != string::npos && word.length() > 3) {
-        cout << "[词性查询] \"" << word << "\" → 形容词 (备用规则: 含'的')" << endl;
-        return "adj";
+string applyBackupPOSRules(const string& word, bool quiet_mode) {
+    // English adjective common patterns
+    vector<string> adj_suffixes = {"ful", "less", "ish", "ous", "ive", "able", "ible", "al", "ic", "ed", "ing"};
+    for (const string& suffix : adj_suffixes) {
+        if (word.length() > suffix.length() &&
+            word.substr(word.length() - suffix.length()) == suffix) {
+            if (!quiet_mode) {
+                cout << "[POS Query] \"" << word << "\" → adjective (backup rule: suffix '" << suffix << "')" << endl;
+            }
+            return "adj";
+        }
     }
 
-    // 中文名词常见特征
-    vector<string> noun_suffixes = {"人", "者", "生", "师", "员", "家", "手", "工"};
+    // English noun common patterns
+    vector<string> noun_suffixes = {"ness", "tion", "sion", "ment", "ity", "ty", "er", "or", "ist", "ian", "ship", "hood"};
     for (const string& suffix : noun_suffixes) {
-        if (word.length() >= suffix.length() &&
+        if (word.length() > suffix.length() &&
             word.substr(word.length() - suffix.length()) == suffix) {
-            cout << "[词性查询] \"" << word << "\" → 名词 (备用规则: 后缀'" << suffix << "')" << endl;
+            if (!quiet_mode) {
+                cout << "[POS Query] \"" << word << "\" → noun (backup rule: suffix '" << suffix << "')" << endl;
+            }
             return "noun";
         }
     }
 
-    // 预定义词汇
-    vector<string> known_nouns = {"女孩", "学生", "老师", "汽车", "轿车", "苹果", "书", "电脑", "手机"};
-    vector<string> known_adjs = {"美丽", "温柔", "聪明", "勤奋", "快速", "红色", "新的", "优秀", "漂亮", "可爱"};
+    // Predefined vocabulary
+    vector<string> known_nouns = {"girl", "student", "teacher", "car", "vehicle", "apple", "book", "computer", "phone", "house", "person", "child", "woman", "man"};
+    vector<string> known_adjs = {"beautiful", "gentle", "smart", "diligent", "fast", "red", "new", "excellent", "pretty", "cute", "good", "bad", "big", "small", "happy", "sad"};
 
     for (const string& noun : known_nouns) {
         if (word == noun) {
-            cout << "[词性查询] \"" << word << "\" → 名词 (备用规则: 预定义)" << endl;
+            if (!quiet_mode) {
+                cout << "[POS Query] \"" << word << "\" → noun (backup rule: predefined)" << endl;
+            }
             return "noun";
         }
     }
 
     for (const string& adj : known_adjs) {
         if (word == adj) {
-            cout << "[词性查询] \"" << word << "\" → 形容词 (备用规则: 预定义)" << endl;
+            if (!quiet_mode) {
+                cout << "[POS Query] \"" << word << "\" → adjective (backup rule: predefined)" << endl;
+            }
             return "adj";
         }
     }
 
-    cout << "[词性查询] \"" << word << "\" → 未知 (所有规则都无法识别)" << endl;
+    if (!quiet_mode) {
+        cout << "[POS Query] \"" << word << "\" → unknown (no rules can identify)" << endl;
+    }
     return "unknown";
 }
 
@@ -160,19 +182,20 @@ struct NounSegment {
 };
 
 /**
- * 解析逗号分隔序列为名词段列表
- * 规则：每个名词前面到上一个名词为止的形容词都属于这个名词
- * @param sequence 逗号分隔的序列 (如: "美丽,温柔,女孩,聪明,勤奋,学生")
- * @return 名词段列表
+ * Parse comma-separated sequence into noun segments list
+ * Rule: adjectives before each noun up to the previous noun belong to this noun
+ * @param sequence comma-separated sequence (e.g.: "beautiful,gentle,girl,smart,diligent,student")
+ * @param quiet_mode Whether to suppress debug output
+ * @return noun segments list
  */
-vector<NounSegment> parseSequenceToNounSegments(const string& sequence) {
+vector<NounSegment> parseSequenceToNounSegments(const string& sequence, bool quiet_mode = false) {
     vector<NounSegment> segments;
     vector<string> words = parseCommaInput(sequence);
 
     vector<string> current_adjectives;
 
     for (const string& word : words) {
-        string pos = identifyPartOfSpeech(word);
+        string pos = identifyPartOfSpeech(word, quiet_mode);
 
         if (pos == "noun") {
             // 遇到名词，创建新的名词段
@@ -296,40 +319,46 @@ double checkSequenceContainment(const vector<NounSegment>& container_segments,
  * @param sequence2 第二个逗号分隔序列 (潜在的被包含者)
  * @return 包含关系强度 (0.0: 无关系, 4.0: 强包含关系)
  */
-double detectSemanticContainment(const string& sequence1, const string& sequence2) {
-    cout << "[语义分析] 检测包含关系: \"" << sequence1 << "\" vs \"" << sequence2 << "\"" << endl;
-
-    // 解析两个序列为名词段
-    vector<NounSegment> segments1 = parseSequenceToNounSegments(sequence1);
-    vector<NounSegment> segments2 = parseSequenceToNounSegments(sequence2);
-
-    cout << "[语义分析] 序列1解析结果:" << endl;
-    for (size_t i = 0; i < segments1.size(); i++) {
-        cout << "  名词: " << segments1[i].noun << ", 形容词: [";
-        for (size_t j = 0; j < segments1[i].adjectives.size(); j++) {
-            cout << segments1[i].adjectives[j];
-            if (j < segments1[i].adjectives.size() - 1) cout << ", ";
-        }
-        cout << "]" << endl;
+double detectSemanticContainment(const string& sequence1, const string& sequence2, bool quiet_mode = false) {
+    if (!quiet_mode) {
+        cout << "[Semantic Analysis] Detecting containment: \"" << sequence1 << "\" vs \"" << sequence2 << "\"" << endl;
     }
 
-    cout << "[语义分析] 序列2解析结果:" << endl;
-    for (size_t i = 0; i < segments2.size(); i++) {
-        cout << "  名词: " << segments2[i].noun << ", 形容词: [";
-        for (size_t j = 0; j < segments2[i].adjectives.size(); j++) {
-            cout << segments2[i].adjectives[j];
-            if (j < segments2[i].adjectives.size() - 1) cout << ", ";
+    // Parse both sequences into noun segments
+    vector<NounSegment> segments1 = parseSequenceToNounSegments(sequence1, quiet_mode);
+    vector<NounSegment> segments2 = parseSequenceToNounSegments(sequence2, quiet_mode);
+
+    if (!quiet_mode) {
+        cout << "[Semantic Analysis] Sequence 1 parse result:" << endl;
+        for (size_t i = 0; i < segments1.size(); i++) {
+            cout << "  Noun: " << segments1[i].noun << ", Adjectives: [";
+            for (size_t j = 0; j < segments1[i].adjectives.size(); j++) {
+                cout << segments1[i].adjectives[j];
+                if (j < segments1[i].adjectives.size() - 1) cout << ", ";
+            }
+            cout << "]" << endl;
         }
-        cout << "]" << endl;
+
+        cout << "[Semantic Analysis] Sequence 2 parse result:" << endl;
+        for (size_t i = 0; i < segments2.size(); i++) {
+            cout << "  Noun: " << segments2[i].noun << ", Adjectives: [";
+            for (size_t j = 0; j < segments2[i].adjectives.size(); j++) {
+                cout << segments2[i].adjectives[j];
+                if (j < segments2[i].adjectives.size() - 1) cout << ", ";
+            }
+            cout << "]" << endl;
+        }
     }
 
-    // 检查包含关系
+    // Check containment relationship
     double containment_strength = checkSequenceContainment(segments1, segments2);
 
-    if (containment_strength > 0.0) {
-        cout << "[语义分析] 检测到包含关系！强度: " << containment_strength << endl;
-    } else {
-        cout << "[语义分析] 未检测到包含关系" << endl;
+    if (!quiet_mode) {
+        if (containment_strength > 0.0) {
+            cout << "[Semantic Analysis] Containment detected! Strength: " << containment_strength << endl;
+        } else {
+            cout << "[Semantic Analysis] No containment detected" << endl;
+        }
     }
 
     return containment_strength;
@@ -341,37 +370,45 @@ double detectSemanticContainment(const string& sequence1, const string& sequence
  * @param input_b 输入B（逗号分隔的序列）
  * @return 无返回值，结果保存在g_semantic_result中
  */
-void analyzeSemanticRelationship(const string& input_a, const string& input_b) {
-    cout << "\n=== 语义关系分析 ===" << endl;
+void analyzeSemanticRelationship(const string& input_a, const string& input_b, bool quiet_mode = false) {
+    if (!quiet_mode) {
+        cout << "\n=== Semantic Relationship Analysis ===" << endl;
+    }
 
-    // 清空之前的结果
+    // Clear previous results
     g_semantic_result = SemanticAnalysisResult();
     g_semantic_result.input_a = input_a;
     g_semantic_result.input_b = input_b;
 
-    cout << "[语义分析] 分析序列包含关系..." << endl;
-    cout << "[语义分析] 序列A: \"" << input_a << "\"" << endl;
-    cout << "[语义分析] 序列B: \"" << input_b << "\"" << endl;
+    if (!quiet_mode) {
+        cout << "[Semantic Analysis] Analyzing sequence containment..." << endl;
+        cout << "[Semantic Analysis] Sequence A: \"" << input_a << "\"" << endl;
+        cout << "[Semantic Analysis] Sequence B: \"" << input_b << "\"" << endl;
+    }
 
-    // 直接检查两个完整序列的包含关系
-    double containment_a_to_b = detectSemanticContainment(input_a, input_b);
-    double containment_b_to_a = detectSemanticContainment(input_b, input_a);
+    // Directly check containment relationship between two complete sequences
+    double containment_a_to_b = detectSemanticContainment(input_a, input_b, quiet_mode);
+    double containment_b_to_a = detectSemanticContainment(input_b, input_a, quiet_mode);
 
-    // 保存结果
+    // Save results
     g_semantic_result.containment_strength_a_to_b = containment_a_to_b;
     g_semantic_result.containment_strength_b_to_a = containment_b_to_a;
 
     if (containment_a_to_b > 0.0 || containment_b_to_a > 0.0) {
         g_semantic_result.has_semantic_enhancement = true;
-        cout << "\n[语义分析结果] 发现语义包含关系：" << endl;
-        if (containment_a_to_b > 0.0) {
-            cout << "  A包含B的强度: " << containment_a_to_b << endl;
-        }
-        if (containment_b_to_a > 0.0) {
-            cout << "  B包含A的强度: " << containment_b_to_a << endl;
+        if (!quiet_mode) {
+            cout << "\n[Semantic Analysis Result] Semantic containment found:" << endl;
+            if (containment_a_to_b > 0.0) {
+                cout << "  A contains B strength: " << containment_a_to_b << endl;
+            }
+            if (containment_b_to_a > 0.0) {
+                cout << "  B contains A strength: " << containment_b_to_a << endl;
+            }
         }
     } else {
-        cout << "\n[语义分析结果] 未发现语义包含关系" << endl;
+        if (!quiet_mode) {
+            cout << "\n[Semantic Analysis Result] No semantic containment found" << endl;
+        }
     }
 }
 
@@ -385,20 +422,24 @@ void analyzeSemanticRelationship(const string& input_a, const string& input_b) {
  * @param input 原始输入字符串
  * @return 处理后的输入字符串
  */
-string preprocessInput(const string& input) {
-    // TODO: 在这里实现语义预处理逻辑
-    // 例如：
-    // 1. 分析复合词：good_content → good + content
-    // 2. 检测包含关系
-    // 3. 扩展同义词
-    // 4. 语义增强
+string preprocessInput(const string& input, bool quiet_mode = false) {
+    // TODO: Implement semantic preprocessing logic here
+    // Examples:
+    // 1. Analyze compound words: good_content → good + content
+    // 2. Detect containment relationships
+    // 3. Expand synonyms
+    // 4. Semantic enhancement
 
-    cout << "[语义预处理] 输入: " << input << endl;
+    if (!quiet_mode) {
+        cout << "[Semantic Preprocessing] Input: " << input << endl;
+    }
 
-    // 当前直接返回原输入，后续可在此添加逻辑
+    // Currently return original input directly, logic can be added later
     string processed = input;
 
-    cout << "[语义预处理] 处理后: " << processed << endl;
+    if (!quiet_mode) {
+        cout << "[Semantic Preprocessing] Processed: " << processed << endl;
+    }
     return processed;
 }
 
@@ -410,14 +451,18 @@ string preprocessInput(const string& input) {
  * @param original_input_b 用户输入的原始对象B
  * @return 增强后的输出
  */
-string postprocessOutput(const string& approacher_output, const string& original_input_a, const string& original_input_b) {
-    cout << "[语义后处理] 分析Approacher输出并应用语义增强..." << endl;
+string postprocessOutput(const string& approacher_output, const string& original_input_a, const string& original_input_b, bool quiet_mode = false) {
+    if (!quiet_mode) {
+        cout << "[Semantic Postprocessing] Analyzing Approacher output and applying semantic enhancement..." << endl;
+    }
 
     string enhanced_output = approacher_output;
 
-    // 如果检测到语义包含关系，需要增强相似度
+    // If semantic containment relationship is detected, need to enhance similarity
     if (g_semantic_result.has_semantic_enhancement) {
-        cout << "[语义后处理] 检测到语义包含关系，应用相似度增强" << endl;
+        if (!quiet_mode) {
+            cout << "[Semantic Postprocessing] Semantic containment detected, applying similarity enhancement" << endl;
+        }
 
         // 解析approacher输出中的相似度百分比
         stringstream ss(approacher_output);
@@ -452,8 +497,10 @@ string postprocessOutput(const string& approacher_output, const string& original
 
                         enhanced_lines += enhanced_line + "\n";
 
-                        cout << "[语义后处理] 相似度增强: " << original_score << " → "
-                             << enhanced_score << " (增强系数: " << enhancement_factor << ")" << endl;
+                        if (!quiet_mode) {
+                            cout << "[Semantic Postprocessing] Similarity enhancement: " << original_score << " → "
+                                 << enhanced_score << " (enhancement factor: " << enhancement_factor << ")" << endl;
+                        }
                     } catch (const exception& e) {
                         // 如果解析失败，保持原行
                         enhanced_lines += line + "\n";
@@ -469,21 +516,23 @@ string postprocessOutput(const string& approacher_output, const string& original
         enhanced_output = enhanced_lines;
     }
 
-    // 添加语义分析报告
-    enhanced_output += "\n=== 语义分析报告 ===\n";
+    if (!quiet_mode) {
+        // Add semantic analysis report
+        enhanced_output += "\n=== Semantic Analysis Report ===\n";
 
-    if (g_semantic_result.has_semantic_enhancement) {
-        enhanced_output += "[语义包含关系] 检测成功\n";
-        if (g_semantic_result.containment_strength_a_to_b > 0.0) {
-            enhanced_output += "  A包含B (强度: " + to_string(g_semantic_result.containment_strength_a_to_b) + ")\n";
+        if (g_semantic_result.has_semantic_enhancement) {
+            enhanced_output += "[Semantic Containment] Detection successful\n";
+            if (g_semantic_result.containment_strength_a_to_b > 0.0) {
+                enhanced_output += "  A contains B (strength: " + to_string(g_semantic_result.containment_strength_a_to_b) + ")\n";
+            }
+            if (g_semantic_result.containment_strength_b_to_a > 0.0) {
+                enhanced_output += "  B contains A (strength: " + to_string(g_semantic_result.containment_strength_b_to_a) + ")\n";
+            }
+            enhanced_output += "  Similarity enhanced based on containment relationship\n";
+        } else {
+            enhanced_output += "[Semantic Containment] Not detected\n";
+            enhanced_output += "  Using original Approacher similarity results\n";
         }
-        if (g_semantic_result.containment_strength_b_to_a > 0.0) {
-            enhanced_output += "  B包含A (强度: " + to_string(g_semantic_result.containment_strength_b_to_a) + ")\n";
-        }
-        enhanced_output += "  相似度已按包含关系进行增强\n";
-    } else {
-        enhanced_output += "[语义包含关系] 未检测到\n";
-        enhanced_output += "  使用原始Approacher相似度结果\n";
     }
 
     return enhanced_output;
@@ -730,26 +779,26 @@ double handleEqualsKeyValueSpecialCases(const string& input_a, const string& inp
     bool a_is_equals_kv = isEqualsKeyValuePair(input_a);
     bool b_is_equals_kv = isEqualsKeyValuePair(input_b);
 
-    // 特殊情况1: 两个完全相同的等号键值对
+    // Special case 1: Two identical equals key-value pairs
     if (a_is_equals_kv && b_is_equals_kv && input_a == input_b) {
-        cout << "[等号键值对] 检测到完全相同的键值对，返回固定相似度100" << endl;
+        cout << "[Equals Key-Value] Detected identical key-value pairs, returning fixed similarity 100" << endl;
         return 100.0;
     }
 
-    // 特殊情况2: 等号键值对 vs 对应的键
+    // Special case 2: equals key-value pair vs corresponding key
     if (a_is_equals_kv && !b_is_equals_kv) {
         string key_a = extractKeyFromEqualsKeyValue(input_a);
         if (!key_a.empty() && key_a == input_b) {
-            cout << "[等号键值对] 检测到键值对与对应键的匹配: \"" << input_a << "\" vs \"" << input_b << "\"，返回固定相似度100" << endl;
+            cout << "[Equals Key-Value] Detected key-value pair vs corresponding key match: \"" << input_a << "\" vs \"" << input_b << "\", returning fixed similarity 100" << endl;
             return 100.0;
         }
     }
 
-    // 特殊情况3: 键 vs 对应的等号键值对
+    // Special case 3: key vs corresponding equals key-value pair
     if (!a_is_equals_kv && b_is_equals_kv) {
         string key_b = extractKeyFromEqualsKeyValue(input_b);
         if (!key_b.empty() && input_a == key_b) {
-            cout << "[等号键值对] 检测到键与对应键值对的匹配: \"" << input_a << "\" vs \"" << input_b << "\"，返回固定相似度100" << endl;
+            cout << "[Equals Key-Value] Detected key vs corresponding key-value pair match: \"" << input_a << "\" vs \"" << input_b << "\", returning fixed similarity 100" << endl;
             return 100.0;
         }
     }
@@ -772,10 +821,10 @@ void preprocessEqualsKeyValuePairs(const string& input_a, const string& input_b,
     processed_b = convertEqualsToColonKeyValue(input_b);
 
     if (processed_a != input_a) {
-        cout << "[等号键值对] 转换: \"" << input_a << "\" → \"" << processed_a << "\"" << endl;
+        cout << "[Equals Key-Value] Conversion: \"" << input_a << "\" → \"" << processed_a << "\"" << endl;
     }
     if (processed_b != input_b) {
-        cout << "[等号键值对] 转换: \"" << input_b << "\" → \"" << processed_b << "\"" << endl;
+        cout << "[Equals Key-Value] Conversion: \"" << input_b << "\" → \"" << processed_b << "\"" << endl;
     }
 }
 
@@ -785,17 +834,17 @@ double runNonInteractiveMode(const string& input_a, const string& input_b, bool 
     string original_a = input_a;
     string original_b = input_b;
 
-    // 检查等号键值对的特殊情况
+    // Check special cases of equals key-value pairs
     if (!quiet_mode) {
-        cout << "\n=== 等号键值对检查阶段 ===" << endl;
+        cout << "\n=== Equals Key-Value Check Phase ===" << endl;
     }
     double special_case_result = handleEqualsKeyValueSpecialCases(input_a, input_b);
 
     if (special_case_result >= 0) {
-        // 是特殊情况，直接返回结果
+        // Is special case, return result directly
         if (!quiet_mode) {
-            cout << "\n最终结果: 等号键值对特殊匹配" << endl;
-            cout << "相似度: " << special_case_result << endl;
+            cout << "\nFinal result: Equals key-value special match" << endl;
+            cout << "Similarity: " << special_case_result << endl;
         } else {
             cout << special_case_result << endl;
         }
@@ -809,32 +858,34 @@ double runNonInteractiveMode(const string& input_a, const string& input_b, bool 
     string line_a = equals_processed_a;
     string line_b = equals_processed_b;
 
-    // 进行语义关系分析
+    // Perform semantic relationship analysis
     if (!quiet_mode) {
-        cout << "\n=== 语义分析阶段 ===" << endl;
+        cout << "\n=== Semantic Analysis Phase ===" << endl;
     }
-    analyzeSemanticRelationship(line_a, line_b);
+    analyzeSemanticRelationship(line_a, line_b, quiet_mode);
 
-    // 预处理输入
-    string processed_a = preprocessInput(line_a);
-    string processed_b = preprocessInput(line_b);
+    // Preprocess input
+    string processed_a = preprocessInput(line_a, quiet_mode);
+    string processed_b = preprocessInput(line_b, quiet_mode);
 
-    // 调用approacher程序
+    // Call approacher program
     if (!quiet_mode) {
-        cout << "\n=== 调用Approacher计算 ===" << endl;
+        cout << "\n=== Calling Approacher Calculation ===" << endl;
     }
     string approacher_result = callApproacher(processed_a, processed_b);
 
-    // 后处理输出
+    // Postprocess output
     if (!quiet_mode) {
-        cout << "\n=== 语义后处理阶段 ===" << endl;
+        cout << "\n=== Semantic Postprocessing Phase ===" << endl;
     }
-    string final_output = postprocessOutput(approacher_result, original_a, original_b);
+    string final_output = postprocessOutput(approacher_result, original_a, original_b, quiet_mode);
 
     // 解析最终相似度值
     stringstream ss(final_output);
     string line;
-    double final_score = 0.0;
+    double final_score = -2.0;  // 默认为程序错误
+    bool found_score = false;
+
     while (getline(ss, line)) {
         size_t colon_pos = line.find(" : ");
         if (colon_pos != string::npos) {
@@ -843,31 +894,40 @@ double runNonInteractiveMode(const string& input_a, const string& input_b, bool 
             if (score_start != string::npos) {
                 try {
                     final_score = stod(score_part.substr(score_start));
+                    found_score = true;
                     break;
                 } catch (...) {}
             }
         }
     }
 
+    // If no valid score found, keep -2.0 (program error)
+    if (!found_score) {
+        final_score = -2.0;
+    } else if (final_score == 0.0) {
+        // Distinguish no match (-1) from actual error (-2)
+        final_score = -1.0;  // No matching concept
+    }
+
     if (quiet_mode) {
         cout << final_score << endl;
     } else {
-        cout << "\n最终相似度: " << final_score << endl;
+        cout << "\nFinal similarity: " << final_score << endl;
     }
 
     return final_score;
 }
 
 void printHelp(const string& program_name) {
-    cout << "用法: " << program_name << " [选项] [输入A] [输入B]" << endl;
-    cout << "\n选项:" << endl;
-    cout << "  -h, --help      显示帮助信息" << endl;
-    cout << "  -q, --quiet     静默模式，只输出相似度数值" << endl;
-    cout << "  -s, --silent    同--quiet" << endl;
-    cout << "\n示例:" << endl;
-    cout << "  交互式模式: " << program_name << endl;
-    cout << "  非交互模式: " << program_name << " \"美丽,女孩\" \"女孩\"" << endl;
-    cout << "  静默模式:   " << program_name << " -q \"key=value\" \"key\"" << endl;
+    cout << "Usage: " << program_name << " [options] [input_A] [input_B]" << endl;
+    cout << "\nOptions:" << endl;
+    cout << "  -h, --help      Show help information" << endl;
+    cout << "  -q, --quiet     Quiet mode, output only similarity values" << endl;
+    cout << "  -s, --silent    Same as --quiet" << endl;
+    cout << "\nExamples:" << endl;
+    cout << "  Interactive mode: " << program_name << endl;
+    cout << "  Non-interactive:  " << program_name << " \"beautiful,girl\" \"girl\"" << endl;
+    cout << "  Quiet mode:       " << program_name << " -q \"key=value\" \"key\"" << endl;
 }
 
 int main(int argc, char* argv[])
@@ -910,13 +970,13 @@ int main(int argc, char* argv[])
     g_semantic_database = make_unique<ConceptDatabase>();
     if (!g_semantic_database->initialize("things/concepts-db")) {
         if (!quiet_mode) {
-            cerr << "警告：无法连接到语义分析数据库，部分功能可能受限" << endl;
+            cerr << "Warning: Unable to connect to semantic analysis database, some features may be limited" << endl;
         }
     } else {
         if (!quiet_mode) {
-            cout << "Semantic Approacher 语义增强概念相似度分析器" << endl;
-            cout << "基于Approacher，增加语义分析层和等号键值对特殊处理" << endl;
-            cout << "语义分析数据库连接成功" << endl;
+            cout << "Semantic Approacher - Enhanced Concept Similarity Analyzer" << endl;
+            cout << "Based on Approacher, with added semantic analysis layer and equals key-value special handling" << endl;
+            cout << "Semantic analysis database connection successful" << endl;
             g_semantic_database->printStatistics(quiet_mode);
         }
     }
@@ -925,20 +985,21 @@ int main(int argc, char* argv[])
     if (arg_index == 2) {
         // 非交互模式
         double score = runNonInteractiveMode(input_a, input_b, quiet_mode);
-        return (score > 0) ? 0 : 1;
+        // 区分退出码：-2为程序错误，其他为正常
+        return (score == -2.0) ? 1 : 0;
     } else if (arg_index == 0) {
-        // 交互式模式
+        // Interactive mode
         if (!quiet_mode) {
-            cout << "\n进入交互式模式..." << endl;
+            cout << "\nEntering interactive mode..." << endl;
         }
         runSemanticApproacher();
     } else {
-        cerr << "错误：参数数量不正确。使用 -h 查看帮助。" << endl;
+        cerr << "Error: Incorrect number of arguments. Use -h for help." << endl;
         return 1;
     }
 
     if (!quiet_mode) {
-        cout << "Semantic Approacher 程序结束。" << endl;
+        cout << "Semantic Approacher program ended." << endl;
     }
     return 0;
 }

@@ -46,7 +46,7 @@ double runNonInteractiveMode(const string& input_a, const string& input_b, bool 
         if (!quiet_mode) {
             cerr << "错误：输入不能为空" << endl;
         }
-        return 0.0;
+        return -2.0;  // 程序错误
     }
 
     // 转换为特征列表
@@ -55,6 +55,11 @@ double runNonInteractiveMode(const string& input_a, const string& input_b, bool 
 
     // 计算相似度
     double main_similarity = g_database->calculateMainSimilarity(features_a, features_b, g_similarity_params);
+
+    // 区分无匹配(-1)和真正错误(-2)
+    if (main_similarity == 0.0) {
+        main_similarity = -1.0;  // 无匹配概念
+    }
 
     if (quiet_mode) {
         cout << main_similarity << endl;
@@ -154,7 +159,8 @@ int main(int argc, char* argv[])
     if (arg_index == 2) {
         // 非交互模式
         double score = runNonInteractiveMode(input_a, input_b, quiet_mode, use_fuzzy_matching);
-        return (score > 0) ? 0 : 1;
+        // 区分退出码：-2为程序错误，其他为正常
+        return (score == -2.0) ? 1 : 0;
     } else if (arg_index == 0) {
         // 交互式模式
         if (!quiet_mode) {

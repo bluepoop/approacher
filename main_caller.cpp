@@ -10,14 +10,30 @@ using namespace std;
 /**
  * 调用 approacher_lib 中的程序的封装类
  */
+/**
+ * 解释相似度分数的含义
+ */
+string explainScore(double score) {
+    if (score == -2.0) {
+        return "程序错误";
+    } else if (score == -1.0) {
+        return "无匹配概念";
+    } else if (score >= 0.0) {
+        return "相似度: " + to_string(score);
+    } else {
+        return "未知错误";
+    }
+}
+
 class ApproacherLibCaller {
 private:
   string lib_path;
 
   /**
    * 执行命令并获取输出
+   * 返回pair<输出内容, 退出码>
    */
-  string executeCommand(const string &command) {
+  pair<string, int> executeCommand(const string &command) {
     // 添加 2>/dev/null 来屏蔽 stderr
     string full_command = command + " 2>/dev/null";
     FILE *pipe = popen(full_command.c_str(), "r");
@@ -32,12 +48,7 @@ private:
     }
 
     int exit_code = pclose(pipe);
-    if (exit_code != 0) {
-      throw runtime_error("命令执行失败 可能是库中无相应概念 (退出码: " +
-                          to_string(exit_code) + ")");
-    }
-
-    return result;
+    return make_pair(result, exit_code);
   }
 
   /**
@@ -68,7 +79,9 @@ private:
       }
     }
 
-    if (last_valid_number < 0) {
+    // 检查是否找到了有效数值
+    // -1和-2是有效返回值，只有在完全没有找到数值时才报错
+    if (last_valid_number < -2.0) {
       throw invalid_argument("无法从输出中解析数值");
     }
 
@@ -105,11 +118,23 @@ public:
     command += " \"" + input_a + "\" \"" + input_b + "\"";
 
     try {
-      string result = executeCommand(command);
-      return parseNumericResult(result);
+      auto result = executeCommand(command);
+      string output = result.first;
+      int exit_code = result.second;
+
+      // 根据退出码判断：0为正常，1为程序错误
+      if (exit_code == 1) {
+        return -2.0;  // 程序错误
+      } else if (exit_code == 0) {
+        // 解析输出，可能是 -1（无匹配）或正常相似度值
+        return parseNumericResult(output);
+      } else {
+        // 其他未知退出码
+        return -2.0;  // 程序错误
+      }
     } catch (const exception &e) {
       cerr << "调用approacher失败: " << e.what() << endl;
-      return -1.0;
+      return -2.0;  // 程序错误
     }
   }
 
@@ -132,11 +157,23 @@ public:
     command += " \"" + input_a + "\" \"" + input_b + "\"";
 
     try {
-      string result = executeCommand(command);
-      return parseNumericResult(result);
+      auto result = executeCommand(command);
+      string output = result.first;
+      int exit_code = result.second;
+
+      // 根据退出码判断：0为正常，1为程序错误
+      if (exit_code == 1) {
+        return -2.0;  // 程序错误
+      } else if (exit_code == 0) {
+        // 解析输出，可能是 -1（无匹配）或正常相似度值
+        return parseNumericResult(output);
+      } else {
+        // 其他未知退出码
+        return -2.0;  // 程序错误
+      }
     } catch (const exception &e) {
       cerr << "调用semantic_approacher失败: " << e.what() << endl;
-      return -1.0;
+      return -2.0;  // 程序错误
     }
   }
 
@@ -161,7 +198,14 @@ public:
     command += " \"" + input_a + "\" \"" + input_b + "\"";
 
     try {
-      return executeCommand(command);
+      auto result = executeCommand(command);
+      string output = result.first;
+      int exit_code = result.second;
+
+      if (exit_code != 0) {
+        return "错误: 程序执行失败 (退出码: " + to_string(exit_code) + ")";
+      }
+      return output;
     } catch (const exception &e) {
       return "错误: " + string(e.what());
     }
@@ -226,14 +270,15 @@ int main() {
     // 基础分析器测试
     double basic_score =
         caller.callApproacher(test_case.first, test_case.second);
-    cout << "基础分析器: " << basic_score << endl;
+    cout << "基础分析器: " << explainScore(basic_score) << endl;
 
     // 语义增强分析器测试
     double semantic_score =
         caller.callSemanticApproacher(test_case.first, test_case.second);
-    cout << "语义增强:   " << semantic_score << endl;
+    cout << "语义增强:   " << explainScore(semantic_score) << endl;
 
-    if (semantic_score > basic_score) {
+    // 只有在都是正常分数时才比较提升
+    if (basic_score >= 0 && semantic_score >= 0 && semantic_score > basic_score) {
       cout << "语义提升:   +" << (semantic_score - basic_score) << endl;
     }
   }
