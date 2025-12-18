@@ -484,7 +484,6 @@ public:
 
   /**
    * 获取完整特征贡献度信息
-   * 注意: 当前版本通过输出解析实现，未来版本会直接调用内部函数
    * @param input_a 输入A
    * @param input_b 输入B
    * @return FullInfoResult结构体，包含相似度和特征贡献度信息
@@ -492,56 +491,55 @@ public:
   FullInfoResult getFullInfo(const string &input_a, const string &input_b) {
     FullInfoResult result;
 
+    string command = "cd " + lib_path + " && ";
+    command += "export LD_LIBRARY_PATH='./lib:$LD_LIBRARY_PATH' && ";
+    command += "./semantic_approacher -f -q";
+
+    command += " \"" + input_a + "\" \"" + input_b + "\"";
+
     try {
-      // 调用语义分析器获取详细输出
-      string detailed_output = getDetailedAnalysis(input_a, input_b, true);
+      auto [output, exit_code] = executeCommand(command);
 
-      // 解析输出以提取相似度信息
-      istringstream ss(detailed_output);
-      string line;
+      if (exit_code != 0) {
+        // 程序执行错误
+        return result; // 返回默认的-2.0错误值
+      }
 
-      while (getline(ss, line)) {
-        // 查找分相似度信息
-        if (line.find("->") != string::npos && line.find(" : ") != string::npos) {
-          // A->B分相似度
-          size_t colon_pos = line.find(" : ");
+      // 解析静默模式输出格式: forward,reverse,main,feature1:contrib1,feature2:contrib2,...
+      if (output.empty()) {
+        return result; // 返回默认的-2.0错误值
+      }
+
+      // 去除换行符
+      string clean_output = output;
+      if (!clean_output.empty() && clean_output.back() == '\n') {
+        clean_output.pop_back();
+      }
+
+      stringstream ss(clean_output);
+      string item;
+      int index = 0;
+
+      while (getline(ss, item, ',')) {
+        if (index == 0) {
+          try { result.forward_similarity = stod(item); } catch (...) {}
+        } else if (index == 1) {
+          try { result.reverse_similarity = stod(item); } catch (...) {}
+        } else if (index == 2) {
+          try { result.main_similarity = stod(item); } catch (...) {}
+        } else {
+          // 解析特征贡献度 格式: "feature:percent"
+          size_t colon_pos = item.find(':');
           if (colon_pos != string::npos) {
-            string score_str = line.substr(colon_pos + 3);
+            string feature = item.substr(0, colon_pos);
+            string percent_str = item.substr(colon_pos + 1);
             try {
-              result.forward_similarity = stod(score_str);
-            } catch (...) {}
-          }
-        } else if (line.find("<-") != string::npos && line.find(" : ") != string::npos) {
-          // B<-A分相似度
-          size_t colon_pos = line.find(" : ");
-          if (colon_pos != string::npos) {
-            string score_str = line.substr(colon_pos + 3);
-            try {
-              result.reverse_similarity = stod(score_str);
-            } catch (...) {}
-          }
-        } else if (line.find("<->") != string::npos && line.find(" : ") != string::npos) {
-          // 主相似度
-          size_t colon_pos = line.find(" : ");
-          if (colon_pos != string::npos) {
-            string score_str = line.substr(colon_pos + 3);
-            try {
-              result.main_similarity = stod(score_str);
+              double percent = stod(percent_str);
+              result.feature_contributions.push_back(FeatureContribution(feature, percent));
             } catch (...) {}
           }
         }
-      }
-
-      // 注意：当前版本通过输出解析实现，无法获取真实的特征贡献度信息
-      // 如需真实贡献度，请直接调用callSemanticApproacher_fullInfo()函数
-
-      // 暂不提供特征贡献度信息（需要直接调用内部函数）
-
-      // 处理错误情况
-      if (result.main_similarity == 0.0) {
-        result.forward_similarity = -1.0;
-        result.reverse_similarity = -1.0;
-        result.main_similarity = -1.0;
+        index++;
       }
 
     } catch (const exception& e) {

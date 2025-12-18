@@ -217,13 +217,78 @@ if (result.has_error()) {
 // 基础分数: -1, 语义分数: 100, 提升: +101 (特殊处理)
 ```
 
+### getFullInfo() - 🆕 特征贡献度分析
+
+获取每个特征对总相似度的贡献百分比，深度理解哪些特征起关键作用：
+
+```cpp
+// 特征贡献度分析调用
+FullInfoResult full_info = caller.getFullInfo("beautiful,red,apple", "apple");
+
+// 基本相似度信息
+cout << "正向相似度 (A→B): " << full_info.forward_similarity << endl;
+cout << "反向相似度 (B→A): " << full_info.reverse_similarity << endl;
+cout << "主相似度 (总体): " << full_info.main_similarity << endl;
+
+// 🎯 特征贡献度vector - 核心功能
+vector<FeatureContribution> contributions = full_info.feature_contributions;
+cout << "\n=== 特征贡献度分析 ===" << endl;
+for (size_t i = 0; i < contributions.size(); i++) {
+    cout << "特征[" << i << "] " << contributions[i].feature
+         << ": " << contributions[i].contribution_percent << "%" << endl;
+}
+
+// 数据处理示例
+if (!contributions.empty()) {
+    // 找出最重要的特征
+    auto max_contrib = *max_element(contributions.begin(), contributions.end(),
+        [](const FeatureContribution& a, const FeatureContribution& b) {
+            return a.contribution_percent < b.contribution_percent;
+        });
+    cout << "关键特征: " << max_contrib.feature
+         << " (贡献度: " << max_contrib.contribution_percent << "%)" << endl;
+}
+```
+
+**输出示例**：
+```
+正向相似度 (A→B): 1
+反向相似度 (B→A): 1
+主相似度 (总体): 1
+
+=== 特征贡献度分析 ===
+特征[0] apple: 100%
+特征[1] beautiful: 0%
+特征[2] red: 65.98%
+关键特征: apple (贡献度: 100%)
+```
+
+**特征贡献度算法说明**：
+- 基于概念重合计算每个特征的实际贡献
+- 贡献度 = 该特征相关概念的相似度 / 总相似度 × 100%
+- 总贡献度可能超过100%（多个特征共享概念时）
+
 ### 推荐使用方式
 
 ```cpp
-// 🌟 推荐: 使用getCompleteSimilarity()获取所有关键信息
-CompleteSimilarityResult result = caller.getCompleteSimilarity("input_a", "input_b");
+// 🌟 推荐: 同时获取三分数和特征贡献度
+ThreeScores three_scores = caller.callSemanticApproacherThree("input_a", "input_b");
+FullInfoResult full_info = caller.getFullInfo("input_a", "input_b");
 
-// 简单判断语义增强效果
+cout << "主相似度: " << three_scores.main_similarity << endl;
+cout << "A→B分相似度: " << three_scores.partial_a_to_b << endl;
+cout << "B→A分相似度: " << three_scores.partial_b_to_a << endl;
+
+// 分析关键特征
+for (const auto& contrib : full_info.feature_contributions) {
+    if (contrib.contribution_percent > 0) {
+        cout << "有效特征: " << contrib.feature
+             << " (贡献" << contrib.contribution_percent << "%)" << endl;
+    }
+}
+
+// 基础分析（可选）
+CompleteSimilarityResult result = caller.getCompleteSimilarity("input_a", "input_b");
 if (result.enhancement_boost > 0.1) {
     cout << "语义增强有效，提升了 " << result.enhancement_boost << endl;
 } else {
