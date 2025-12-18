@@ -117,10 +117,10 @@ export LD_LIBRARY_PATH="./lib:$LD_LIBRARY_PATH"
 使用提供的封装类：
 
 ```cpp
-#include "ApproacherLibCaller.hpp"  // 见 main_caller.cpp
+#include "main_caller.cpp"  // 包含完整的调用接口
 
 int main() {
-    ApproacherLibCaller caller;
+    ApproacherLibCaller caller("approacher_lib");
 
     // 基础相似度计算
     double score1 = caller.callApproacher("red,apple", "green,apple");
@@ -130,11 +130,104 @@ int main() {
     double score2 = caller.callSemanticApproacher("key=value", "key");
     cout << "语义增强: " << score2 << endl;
 
+    // 🆕 三分数调用 - 获取三个相似度数值
+    ThreeScores scores = caller.callSemanticApproacherThree("beautiful,red,apple", "apple");
+    cout << "主相似度: " << scores.main_similarity << endl;      // 语义增强后的主分数
+    cout << "A→B分相似度: " << scores.partial_a_to_b << endl;    // A到B方向分数
+    cout << "B→A分相似度: " << scores.partial_b_to_a << endl;    // B到A方向分数
+
+    // 🆕 完整分析 - 一次获取基础+语义+提升幅度
+    CompleteSimilarityResult result = caller.getCompleteSimilarity("beautiful,red,apple", "apple");
+    cout << "基础分数: " << result.basic_score << endl;         // 基础approacher分数
+    cout << "语义分数: " << result.semantic_score << endl;      // 语义增强分数
+    cout << "提升幅度: " << result.enhancement_boost << endl;   // 语义提升量
+
+    // 状态检查
+    if (result.has_error()) {
+        cout << "程序错误" << endl;
+    } else if (result.no_match()) {
+        cout << "无匹配概念" << endl;
+    }
+
     // 获取详细分析
     string analysis = caller.getDetailedAnalysis("red,apple", "green,apple", true);
     cout << analysis << endl;
 
     return 0;
+}
+```
+
+## 🆕 新增API - 三分数和完整分析
+
+### callSemanticApproacherThree() - 三分数调用
+
+获取三个不同方向的相似度数值：
+
+```cpp
+// 基本调用
+ApproacherLibCaller caller("approacher_lib");
+ThreeScores result = caller.callSemanticApproacherThree("beautiful,red,apple", "apple");
+
+// 获取三个数值
+cout << "主相似度: " << result.main_similarity << endl;     // 语义增强后的主分数
+cout << "A→B分相似度: " << result.partial_a_to_b << endl;   // A到B方向分数
+cout << "B→A分相似度: " << result.partial_b_to_a << endl;   // B到A方向分数
+
+// 参数说明
+// - input_a: 输入A（字符串）
+// - input_b: 输入B（字符串）
+// - quiet_mode: 静默模式（默认true，建议保持）
+
+// 返回值说明
+// - 正常情况: 三个正数分别表示不同方向的相似度
+// - 无匹配: 返回 (-1, -1, -1)
+// - 程序错误: 返回 (-2, -2, -2)
+```
+
+### getCompleteSimilarity() - 完整分析
+
+一次调用获取基础分数、语义分数和提升幅度：
+
+```cpp
+// 完整分析调用
+CompleteSimilarityResult result = caller.getCompleteSimilarity("beautiful,red,apple", "apple");
+
+// 访问三个核心数值
+cout << "基础分数: " << result.basic_score << endl;        // 基础approacher分数
+cout << "语义分数: " << result.semantic_score << endl;     // 语义增强分数
+cout << "提升幅度: " << result.enhancement_boost << endl;  // 语义提升量(semantic - basic)
+
+// 使用便捷状态检查方法
+if (result.has_error()) {
+    cout << "程序错误" << endl;
+} else if (result.no_match()) {
+    cout << "无匹配概念" << endl;
+} else if (result.enhancement_boost > 0.5) {
+    cout << "语义增强显著！" << endl;
+}
+
+// 实际测试结果示例:
+// "beautiful,red,apple" vs "apple"
+// 基础分数: 1.066, 语义分数: 3.730, 提升: +2.664 (显著增强)
+
+// "red,apple" vs "green,apple"
+// 基础分数: 1.097, 语义分数: 1.097, 提升: +0.00002 (无变化)
+
+// "key=value" vs "key"
+// 基础分数: -1, 语义分数: 100, 提升: +101 (特殊处理)
+```
+
+### 推荐使用方式
+
+```cpp
+// 🌟 推荐: 使用getCompleteSimilarity()获取所有关键信息
+CompleteSimilarityResult result = caller.getCompleteSimilarity("input_a", "input_b");
+
+// 简单判断语义增强效果
+if (result.enhancement_boost > 0.1) {
+    cout << "语义增强有效，提升了 " << result.enhancement_boost << endl;
+} else {
+    cout << "无明显语义增强" << endl;
 }
 ```
 

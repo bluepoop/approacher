@@ -24,6 +24,16 @@ string applyBackupPOSRules(const string& word, bool quiet_mode = false);
 // 全局数据库实例
 unique_ptr<ConceptDatabase> g_semantic_database;
 
+// 三分数结构体 - 存储主相似度和两个方向的分相似度
+struct ThreeScoreResult {
+    double main_similarity;     // 语义增强后的主相似度
+    double partial_a_to_b;      // A→B方向分相似度
+    double partial_b_to_a;      // B→A方向分相似度
+
+    ThreeScoreResult(double main = -2.0, double a_to_b = -2.0, double b_to_a = -2.0)
+        : main_similarity(main), partial_a_to_b(a_to_b), partial_b_to_a(b_to_a) {}
+};
+
 // 全局语义分析结果存储
 struct SemanticAnalysisResult {
     string input_a;
@@ -880,42 +890,84 @@ double runNonInteractiveMode(const string& input_a, const string& input_b, bool 
     }
     string final_output = postprocessOutput(approacher_result, original_a, original_b, quiet_mode);
 
-    // 解析最终相似度值
-    stringstream ss(final_output);
-    string line;
-    double final_score = -2.0;  // 默认为程序错误
-    bool found_score = false;
+    // Parse three scores from original approacher output
+    ThreeScoreResult basic_scores;
 
-    while (getline(ss, line)) {
-        size_t colon_pos = line.find(" : ");
-        if (colon_pos != string::npos) {
-            string score_part = line.substr(colon_pos + 3);
-            size_t score_start = score_part.find_first_not_of(" \t");
-            if (score_start != string::npos) {
-                try {
-                    final_score = stod(score_part.substr(score_start));
-                    found_score = true;
-                    break;
-                } catch (...) {}
-            }
+    stringstream basic_ss(approacher_result);
+    string basic_line;
+    while (getline(basic_ss, basic_line)) {
+        if (basic_line.find("->") != string::npos && basic_line.find(" : ") != string::npos) {
+            // A→B direction: [A]->[B] : score
+            size_t colon_pos = basic_line.find(" : ");
+            string score_str = basic_line.substr(colon_pos + 3);
+            try {
+                basic_scores.partial_a_to_b = stod(score_str);
+            } catch (...) {}
+        } else if (basic_line.find("<-") != string::npos && basic_line.find("<->") == string::npos && basic_line.find(" : ") != string::npos) {
+            // B→A direction: [A]<-[B] : score
+            size_t colon_pos = basic_line.find(" : ");
+            string score_str = basic_line.substr(colon_pos + 3);
+            try {
+                basic_scores.partial_b_to_a = stod(score_str);
+            } catch (...) {}
+        } else if (basic_line.find("<->") != string::npos && basic_line.find(" : ") != string::npos) {
+            // Main similarity: [A]<->[B] : score
+            size_t colon_pos = basic_line.find(" : ");
+            string score_str = basic_line.substr(colon_pos + 3);
+            try {
+                basic_scores.main_similarity = stod(score_str);
+            } catch (...) {}
         }
     }
 
-    // If no valid score found, keep -2.0 (program error)
-    if (!found_score) {
-        final_score = -2.0;
-    } else if (final_score == 0.0) {
-        // Distinguish no match (-1) from actual error (-2)
-        final_score = -1.0;  // No matching concept
+    // Parse enhanced main similarity from final output
+    ThreeScoreResult enhanced_scores = basic_scores;  // Copy basic scores first
+
+    stringstream ss(final_output);
+    string line;
+    while (getline(ss, line)) {
+        if (line.find("<->") != string::npos && line.find(" : ") != string::npos) {
+            // Enhanced main similarity: [A]<->[B] : score
+            size_t colon_pos = line.find(" : ");
+            string score_str = line.substr(colon_pos + 3);
+            try {
+                enhanced_scores.main_similarity = stod(score_str);
+                break;
+            } catch (...) {}
+        }
+    }
+
+    // Handle error cases
+    if (basic_scores.main_similarity <= 0.0 && basic_scores.partial_a_to_b <= 0.0 && basic_scores.partial_b_to_a <= 0.0) {
+        // No valid scores found
+        if (basic_scores.main_similarity == 0.0) {
+            basic_scores.main_similarity = -1.0;  // No matching concept
+            enhanced_scores.main_similarity = -1.0;
+        } else {
+            basic_scores.main_similarity = -2.0;  // Program error
+            enhanced_scores.main_similarity = -2.0;
+        }
+        basic_scores.partial_a_to_b = basic_scores.main_similarity;
+        basic_scores.partial_b_to_a = basic_scores.main_similarity;
+        enhanced_scores.partial_a_to_b = basic_scores.partial_a_to_b;
+        enhanced_scores.partial_b_to_a = basic_scores.partial_b_to_a;
     }
 
     if (quiet_mode) {
-        cout << final_score << endl;
+        // Output format: main_similarity,partial_a_to_b,partial_b_to_a
+        cout << enhanced_scores.main_similarity << ","
+             << enhanced_scores.partial_a_to_b << ","
+             << enhanced_scores.partial_b_to_a << endl;
     } else {
-        cout << "\nFinal similarity: " << final_score << endl;
+        cout << "\nMain similarity: " << enhanced_scores.main_similarity << endl;
+        cout << "A→B partial similarity: " << enhanced_scores.partial_a_to_b << endl;
+        cout << "B→A partial similarity: " << enhanced_scores.partial_b_to_a << endl;
+        if (g_semantic_result.has_semantic_enhancement && enhanced_scores.main_similarity != basic_scores.main_similarity) {
+            cout << "Semantic enhancement: " << (enhanced_scores.main_similarity - basic_scores.main_similarity) << endl;
+        }
     }
 
-    return final_score;
+    return enhanced_scores.main_similarity;
 }
 
 void printHelp(const string& program_name) {
