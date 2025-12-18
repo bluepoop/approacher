@@ -56,6 +56,39 @@ struct CompleteSimilarityResult {
 };
 
 /**
+ * 特征贡献度信息结构体
+ */
+struct FeatureContribution {
+    string feature;           // 特征名
+    double contribution_percent;  // 贡献百分比
+
+    FeatureContribution(const string& feat = "", double contrib = 0.0)
+        : feature(feat), contribution_percent(contrib) {}
+};
+
+/**
+ * 完整信息结果结构体 - 包含相似度和特征贡献度信息
+ */
+struct FullInfoResult {
+    double forward_similarity;      // 正向相似度 (A→B)
+    double reverse_similarity;      // 反向相似度 (B→A)
+    double main_similarity;         // 主相似度 (总相似度)
+    vector<FeatureContribution> feature_contributions;  // 每个特征的贡献度
+
+    // 错误检查
+    bool has_error() const {
+        return main_similarity == -2.0;
+    }
+
+    bool no_match() const {
+        return main_similarity == -1.0;
+    }
+
+    FullInfoResult(double forward = -2.0, double reverse = -2.0, double main = -2.0)
+        : forward_similarity(forward), reverse_similarity(reverse), main_similarity(main) {}
+};
+
+/**
  * 解释相似度分数的含义
  */
 string explainScore(double score) {
@@ -140,6 +173,30 @@ private:
     }
 
     return last_valid_number;
+  }
+
+  /**
+   * 解析逗号分隔的输入字符串
+   */
+  vector<string> parseCommaInput(const string& input) {
+    vector<string> result;
+    stringstream ss(input);
+    string item;
+
+    while (getline(ss, item, ',')) {
+        // 去除前后空格
+        size_t start = item.find_first_not_of(" \t");
+        if (start == string::npos) continue; // 空字符串
+
+        size_t end = item.find_last_not_of(" \t");
+        item = item.substr(start, end - start + 1);
+
+        if (!item.empty()) {
+            result.push_back(item);
+        }
+    }
+
+    return result;
   }
 
   /**
@@ -423,6 +480,75 @@ public:
 
     // 返回完整结果
     return CompleteSimilarityResult(basic_score, semantic_score);
+  }
+
+  /**
+   * 获取完整特征贡献度信息
+   * 注意: 当前版本通过输出解析实现，未来版本会直接调用内部函数
+   * @param input_a 输入A
+   * @param input_b 输入B
+   * @return FullInfoResult结构体，包含相似度和特征贡献度信息
+   */
+  FullInfoResult getFullInfo(const string &input_a, const string &input_b) {
+    FullInfoResult result;
+
+    try {
+      // 调用语义分析器获取详细输出
+      string detailed_output = getDetailedAnalysis(input_a, input_b, true);
+
+      // 解析输出以提取相似度信息
+      istringstream ss(detailed_output);
+      string line;
+
+      while (getline(ss, line)) {
+        // 查找分相似度信息
+        if (line.find("->") != string::npos && line.find(" : ") != string::npos) {
+          // A->B分相似度
+          size_t colon_pos = line.find(" : ");
+          if (colon_pos != string::npos) {
+            string score_str = line.substr(colon_pos + 3);
+            try {
+              result.forward_similarity = stod(score_str);
+            } catch (...) {}
+          }
+        } else if (line.find("<-") != string::npos && line.find(" : ") != string::npos) {
+          // B<-A分相似度
+          size_t colon_pos = line.find(" : ");
+          if (colon_pos != string::npos) {
+            string score_str = line.substr(colon_pos + 3);
+            try {
+              result.reverse_similarity = stod(score_str);
+            } catch (...) {}
+          }
+        } else if (line.find("<->") != string::npos && line.find(" : ") != string::npos) {
+          // 主相似度
+          size_t colon_pos = line.find(" : ");
+          if (colon_pos != string::npos) {
+            string score_str = line.substr(colon_pos + 3);
+            try {
+              result.main_similarity = stod(score_str);
+            } catch (...) {}
+          }
+        }
+      }
+
+      // 注意：当前版本通过输出解析实现，无法获取真实的特征贡献度信息
+      // 如需真实贡献度，请直接调用callSemanticApproacher_fullInfo()函数
+
+      // 暂不提供特征贡献度信息（需要直接调用内部函数）
+
+      // 处理错误情况
+      if (result.main_similarity == 0.0) {
+        result.forward_similarity = -1.0;
+        result.reverse_similarity = -1.0;
+        result.main_similarity = -1.0;
+      }
+
+    } catch (const exception& e) {
+      // 错误情况，保持默认的-2.0值
+    }
+
+    return result;
   }
 
   /**

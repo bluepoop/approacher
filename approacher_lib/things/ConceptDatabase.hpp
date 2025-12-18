@@ -100,6 +100,20 @@ public:
     // 计算主相似度
     double calculateMainSimilarity(const vector<Feature>& features_A, const vector<Feature>& features_B, const unordered_map<string, double>& params);
 
+    // 计算特征贡献度的完整信息
+    struct FeatureContributionInfo {
+        double forward_similarity;      // A→B方向分相似度
+        double reverse_similarity;      // B→A方向分相似度
+        double main_similarity;         // 主相似度
+        map<string, double> feature_contributions; // 每个特征的贡献度
+    };
+
+    // 计算包含特征贡献度信息的完整相似度分析
+    FeatureContributionInfo calculateSimilarityWithFeatureContribution(
+        const vector<Feature>& features_A,
+        const vector<Feature>& features_B,
+        const unordered_map<string, double>& params);
+
     // Stage 3: 模糊匹配和参数学习功能
 
     // 计算字符串编辑距离（Levenshtein距离）

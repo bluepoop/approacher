@@ -43,6 +43,35 @@ struct SemanticAnalysisResult {
     bool has_semantic_enhancement = false;
 } g_semantic_result;
 
+// 特征贡献度信息结构体
+struct FeatureContribution {
+    string feature;           // 特征名
+    double contribution_percent;  // 贡献百分比
+
+    FeatureContribution(const string& feat = "", double contrib = 0.0)
+        : feature(feat), contribution_percent(contrib) {}
+};
+
+// 完整信息结果结构体
+struct FullInfoResult {
+    double forward_similarity;      // 正向相似度 (A→B)
+    double reverse_similarity;      // 反向相似度 (B→A)
+    double main_similarity;         // 主相似度 (总相似度)
+    vector<FeatureContribution> feature_contributions;  // 每个特征的贡献度
+
+    // 错误检查
+    bool has_error() const {
+        return main_similarity == -2.0;
+    }
+
+    bool no_match() const {
+        return main_similarity == -1.0;
+    }
+
+    FullInfoResult(double forward = -2.0, double reverse = -2.0, double main = -2.0)
+        : forward_similarity(forward), reverse_similarity(reverse), main_similarity(main) {}
+};
+
 // =============================================================================
 // 语义包含匹配功能 (复合词形容词+名词包含关系检测)
 // =============================================================================
@@ -976,15 +1005,134 @@ void printHelp(const string& program_name) {
     cout << "  -h, --help      Show help information" << endl;
     cout << "  -q, --quiet     Quiet mode, output only similarity values" << endl;
     cout << "  -s, --silent    Same as --quiet" << endl;
+    cout << "  -f, --fullinfo  Get full info including feature contributions" << endl;
     cout << "\nExamples:" << endl;
     cout << "  Interactive mode: " << program_name << endl;
     cout << "  Non-interactive:  " << program_name << " \"beautiful,girl\" \"girl\"" << endl;
     cout << "  Quiet mode:       " << program_name << " -q \"key=value\" \"key\"" << endl;
+    cout << "  Full info:        " << program_name << " -f \"red,apple\" \"apple\"" << endl;
+}
+
+/**
+ * 获取完整的特征贡献度信息
+ * @param input_a 输入A字符串
+ * @param input_b 输入B字符串
+ * @param quiet_mode 是否静默模式
+ * @return FullInfoResult 包含相似度和特征贡献信息
+ */
+FullInfoResult callSemanticApproacher_fullInfo(const string& input_a, const string& input_b, bool quiet_mode = false) {
+    FullInfoResult result;
+
+    if (!g_semantic_database) {
+        if (!quiet_mode) {
+            cerr << "Database not initialized!" << endl;
+        }
+        return result; // 默认值为-2.0，表示错误
+    }
+
+    try {
+        // 解析输入
+        auto parsed_a = parseCommaInput(input_a);
+        auto parsed_b = parseCommaInput(input_b);
+
+        if (parsed_a.empty() || parsed_b.empty()) {
+            if (!quiet_mode) {
+                cerr << "Input cannot be empty" << endl;
+            }
+            return result; // -2.0 程序错误
+        }
+
+        // 预处理特殊格式
+        string processed_a = input_a;
+        string processed_b = input_b;
+        preprocessEqualsKeyValuePairs(input_a, input_b, processed_a, processed_b);
+
+        // 转换为特征列表
+        auto features_a = parseFeatureList(parseCommaInput(processed_a));
+        auto features_b = parseFeatureList(parseCommaInput(processed_b));
+
+        // 使用ConceptDatabase的完整贡献度计算函数
+        auto contribution_info = g_semantic_database->calculateSimilarityWithFeatureContribution(
+            features_a, features_b, g_similarity_params);
+
+        // 填充结果
+        result.forward_similarity = contribution_info.forward_similarity;
+        result.reverse_similarity = contribution_info.reverse_similarity;
+        result.main_similarity = contribution_info.main_similarity;
+
+        // 转换特征贡献信息
+        for (const auto& contrib : contribution_info.feature_contributions) {
+            result.feature_contributions.push_back(FeatureContribution(contrib.first, contrib.second));
+        }
+
+        // 应用语义增强
+        if (contribution_info.main_similarity > 0.0) {
+            // 检测语义包含关系
+            double containment_a_to_b = 0.0;
+            double containment_b_to_a = 0.0;
+            bool has_semantic = false;
+
+            // 检测A→B方向的语义包含
+            vector<string> compound_a = parseCommaInput(processed_a);
+            vector<string> compound_b = parseCommaInput(processed_b);
+
+            for (const auto& item_a : compound_a) {
+                for (const auto& item_b : compound_b) {
+                    double containment = detectSemanticContainment(item_a, item_b, quiet_mode);
+                    if (containment > 0.0) {
+                        containment_a_to_b += containment;
+                        has_semantic = true;
+                    }
+                }
+            }
+
+            // 检测B→A方向的语义包含
+            for (const auto& item_b : compound_b) {
+                for (const auto& item_a : compound_a) {
+                    double containment = detectSemanticContainment(item_b, item_a, quiet_mode);
+                    if (containment > 0.0) {
+                        containment_b_to_a += containment;
+                        has_semantic = true;
+                    }
+                }
+            }
+
+            // 应用语义增强
+            if (has_semantic) {
+                double semantic_boost_a_to_b = containment_a_to_b * 0.3;
+                double semantic_boost_b_to_a = containment_b_to_a * 0.3;
+
+                result.forward_similarity = min(1.0, result.forward_similarity + semantic_boost_a_to_b);
+                result.reverse_similarity = min(1.0, result.reverse_similarity + semantic_boost_b_to_a);
+                result.main_similarity = sqrt(result.forward_similarity * result.reverse_similarity);
+
+                if (!quiet_mode) {
+                    cout << "[Semantic Enhancement Applied]" << endl;
+                }
+            }
+        }
+
+        // 处理无匹配情况
+        if (result.main_similarity == 0.0) {
+            result.forward_similarity = -1.0;
+            result.reverse_similarity = -1.0;
+            result.main_similarity = -1.0;
+        }
+
+    } catch (const exception& e) {
+        if (!quiet_mode) {
+            cerr << "Error during calculation: " << e.what() << endl;
+        }
+        // 保持默认的-2.0错误值
+    }
+
+    return result;
 }
 
 int main(int argc, char* argv[])
 {
     bool quiet_mode = false;
+    bool fullinfo_mode = false;
     string input_a, input_b;
 
     // 解析命令行参数
@@ -1006,6 +1154,8 @@ int main(int argc, char* argv[])
     for (size_t i = 0; i < args.size(); i++) {
         if (args[i] == "-q" || args[i] == "--quiet" || args[i] == "-s" || args[i] == "--silent") {
             quiet_mode = true;
+        } else if (args[i] == "-f" || args[i] == "--fullinfo") {
+            fullinfo_mode = true;
         } else {
             // 非选项参数
             if (arg_index == 0) {
@@ -1036,9 +1186,42 @@ int main(int argc, char* argv[])
     // 根据参数决定运行模式
     if (arg_index == 2) {
         // 非交互模式
-        double score = runNonInteractiveMode(input_a, input_b, quiet_mode);
-        // 区分退出码：-2为程序错误，其他为正常
-        return (score == -2.0) ? 1 : 0;
+        if (fullinfo_mode) {
+            // 完整信息模式
+            FullInfoResult result = callSemanticApproacher_fullInfo(input_a, input_b, quiet_mode);
+
+            if (quiet_mode) {
+                // 静默模式：输出结构化数据
+                cout << result.forward_similarity << "," << result.reverse_similarity << "," << result.main_similarity;
+                for (const auto& contrib : result.feature_contributions) {
+                    cout << "," << contrib.feature << ":" << contrib.contribution_percent;
+                }
+                cout << endl;
+            } else {
+                // 详细模式：输出可读信息
+                cout << "\n=== 完整相似度分析结果 ===" << endl;
+                cout << "正向相似度 (A→B): " << result.forward_similarity << endl;
+                cout << "反向相似度 (B→A): " << result.reverse_similarity << endl;
+                cout << "主相似度 (总体): " << result.main_similarity << endl;
+
+                cout << "\n=== 特征贡献度分析 ===" << endl;
+                for (const auto& contrib : result.feature_contributions) {
+                    cout << "特征 \"" << contrib.feature << "\": " << contrib.contribution_percent << "%" << endl;
+                }
+            }
+
+            // 根据结果确定退出码
+            if (result.has_error()) {
+                return 1;  // 程序错误
+            } else {
+                return 0;  // 正常
+            }
+        } else {
+            // 标准模式
+            double score = runNonInteractiveMode(input_a, input_b, quiet_mode);
+            // 区分退出码：-2为程序错误，其他为正常
+            return (score == -2.0) ? 1 : 0;
+        }
     } else if (arg_index == 0) {
         // Interactive mode
         if (!quiet_mode) {

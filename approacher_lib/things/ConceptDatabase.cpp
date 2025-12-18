@@ -578,6 +578,140 @@ double ConceptDatabase::calculateMainSimilarity(const vector<Feature>& features_
     return sqrt(partial_similarity_A * partial_similarity_B);
 }
 
+ConceptDatabase::FeatureContributionInfo ConceptDatabase::calculateSimilarityWithFeatureContribution(
+    const vector<Feature>& features_A,
+    const vector<Feature>& features_B,
+    const unordered_map<string, double>& params) {
+
+    FeatureContributionInfo result;
+
+    // 1. 正常的完整计算
+    auto matches_A = findMatchingConcepts(features_A);
+    auto matches_B = findMatchingConcepts(features_B);
+
+    int total_features_A = features_A.size();
+    int total_features_B = features_B.size();
+
+    int total_matches = 0;
+    auto full_overlap_map = analyzeOverlap(matches_A, matches_B, total_features_A, total_features_B, total_matches);
+
+    if (total_matches == 0) {
+        result.forward_similarity = 0.0;
+        result.reverse_similarity = 0.0;
+        result.main_similarity = 0.0;
+        return result;
+    }
+
+    // 计算正常的分相似度和主相似度
+    int matches_A_count = matches_A.size();
+    int matches_B_count = matches_B.size();
+
+    double full_partial_A = calculatePartialSimilarity(full_overlap_map, matches_A_count, params);
+
+    map<pair<int,int>, int> full_overlap_map_B;
+    for (const auto& entry : full_overlap_map) {
+        pair<int,int> swapped_pair(entry.first.second, entry.first.first);
+        full_overlap_map_B[swapped_pair] = entry.second;
+    }
+    double full_partial_B = calculatePartialSimilarity(full_overlap_map_B, matches_B_count, params);
+
+    result.forward_similarity = full_partial_A;
+    result.reverse_similarity = full_partial_B;
+    result.main_similarity = sqrt(full_partial_A * full_partial_B);
+
+    // 2. 为每个A的特征计算贡献度
+    for (const auto& feature : features_A) {
+        string feature_str = feature.key.empty() ? feature.value : (feature.key + ":" + feature.value);
+
+        // 构建特征-概念映射
+        set<obx_id> feature_relevant_concepts;
+
+        // 找出包含此特征的概念
+        for (const auto& match : matches_A) {
+            // 检查这个概念是否包含当前特征
+            try {
+                auto concept = conceptBox->get(match.concept_id);
+                if (concept) {
+                    bool contains_feature = false;
+
+                    if (feature.key.empty()) {
+                        // 只比较value
+                        for (const auto& concept_value : concept->feature_values) {
+                            if (concept_value == feature.value) {
+                                contains_feature = true;
+                                break;
+                            }
+                        }
+                    } else {
+                        // 比较key和value
+                        for (size_t i = 0; i < concept->feature_keys.size(); i++) {
+                            if (concept->feature_keys[i] == feature.key &&
+                                concept->feature_values[i] == feature.value) {
+                                contains_feature = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (contains_feature) {
+                        feature_relevant_concepts.insert(match.concept_id);
+                    }
+                }
+            } catch (const exception& e) {
+                // 忽略获取概念失败的错误
+            }
+        }
+
+        // 计算该特征的贡献相似度
+        if (feature_relevant_concepts.empty()) {
+            result.feature_contributions[feature_str] = 0.0;
+            continue;
+        }
+
+        // 筛选overlap_map，只保留relevant_concepts参与的重合
+        map<pair<int,int>, int> feature_overlap_map;
+        for (const auto& match_A : matches_A) {
+            if (feature_relevant_concepts.count(match_A.concept_id)) {
+                // 查找这个概念在B中是否有匹配
+                for (const auto& match_B : matches_B) {
+                    if (match_A.concept_id == match_B.concept_id) {
+                        int level_A = calculateMatchLevel(match_A.match_count, total_features_A);
+                        int level_B = calculateMatchLevel(match_B.match_count, total_features_B);
+                        pair<int,int> level_pair(level_A, level_B);
+                        feature_overlap_map[level_pair]++;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (feature_overlap_map.empty()) {
+            result.feature_contributions[feature_str] = 0.0;
+        } else {
+            // 计算该特征的分相似度
+            double feature_partial_A = calculatePartialSimilarity(feature_overlap_map, matches_A_count, params);
+
+            map<pair<int,int>, int> feature_overlap_map_B;
+            for (const auto& entry : feature_overlap_map) {
+                pair<int,int> swapped_pair(entry.first.second, entry.first.first);
+                feature_overlap_map_B[swapped_pair] = entry.second;
+            }
+            double feature_partial_B = calculatePartialSimilarity(feature_overlap_map_B, matches_B_count, params);
+
+            double feature_main_similarity = sqrt(feature_partial_A * feature_partial_B);
+
+            // 计算贡献百分比
+            if (result.main_similarity > 0.0) {
+                result.feature_contributions[feature_str] = (feature_main_similarity / result.main_similarity) * 100.0;
+            } else {
+                result.feature_contributions[feature_str] = 0.0;
+            }
+        }
+    }
+
+    return result;
+}
+
 // Stage 3: 模糊匹配和参数学习功能
 
 int ConceptDatabase::calculateStringDistance(const string& str1, const string& str2) {
